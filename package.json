@@ -1,6 +1,6 @@
 {
   "name": "dsh-free-vision",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Free vision plugin for DeepSeek Harness (dsh): image understanding for text-only models with free-tier providers (Qwen3-VL-Flash / DeepSeek-OCR / Doubao). 免费视觉插件：纯文本模型看图能力，优先免费模型（通义千问 / 硅基流动 / 豆包）。",
   "type": "module",
   "main": "./dsh/index.js",
@@ -16,7 +16,10 @@
     "README.md",
     "LICENSE",
     "README.zh-CN.md",
-    "client"
+    "client",
+    "docs",
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "keywords": [
     "dsh",
@@ -62,5 +65,14 @@
     "url": "https://github.com/FuzzySoul/dsh-free-vision/issues"
   },
   "homepage": "https://github.com/FuzzySoul/dsh-free-vision#readme",
-  "author": "FuzzySoul"
+  "author": "FuzzySoul",
+  "types": "./dsh/index.d.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "release": "node scripts/release.mjs"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.0"
+  }
 }

@@ -1,5 +1,12 @@
 # dsh-free-vision
 
+[![npm version](https://img.shields.io/npm/v/dsh-free-vision)](https://www.npmjs.com/package/dsh-free-vision)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-free-vision)](https://www.npmjs.com/package/dsh-free-vision)
+[![license](https://img.shields.io/npm/l/dsh-free-vision)](LICENSE)
+[![stars](https://img.shields.io/github/stars/FuzzySoul/dsh-free-vision)](https://github.com/FuzzySoul/dsh-free-vision)
+[![GitHub issues](https://img.shields.io/github/issues/FuzzySoul/dsh-free-vision)](https://github.com/FuzzySoul/dsh-free-vision/issues)
+
+
 **Free vision plugin for DeepSeek Harness (dsh)** — gives text-only models the ability to read images (screenshots, code errors, UI layouts, documents, OCR) using **free-tier vision models**, with zero MCP configuration.
 
 DSH 免费视觉插件：让纯文本模型获得看图能力，优先使用各平台免费视觉模型，无需手动配置 MCP。

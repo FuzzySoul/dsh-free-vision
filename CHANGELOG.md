@@ -1,0 +1,119 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.6.0] - 2026-08-15
+
+### Added
+
+- Engineering hardening pass: vitest unit test suite (13 tests), GitHub Actions CI,
+  release script, type declarations, docs/ARCHITECTURE.md, CHANGELOG/SECURITY/CONTRIBUTING/CODE_OF_CONDUCT,
+  README badges, .editorconfig/.gitattributes.
+- Engine auto-reconnect with exponential backoff (luma-mcp process crash recovery).
+- Logger via ctx.logger with console fallback.
+
+## [0.5.0] - 2026-08-15
+
+### Added
+
+- Provider linkage: per-provider API keys (`keys` map), one key slot per provider,
+  automatic key selection when switching providers.
+- Signup links for every provider (阿里云百炼 / 火山方舟 / 硅基流动 / 智谱 / 腾讯云 TokenHub).
+- Live status line in the settings UI (active provider + key source).
+- `keySource` (`file` / `env` / `none`) exposed by the config API.
+
+### Changed
+
+- Settings UI fully dark-themed (readable by vision models and screenshot pipelines).
+- Settings UI shows "current effective config" instead of stale defaults.
+- Legacy flat `apiKey` config is migrated into `keys[provider]` automatically.
+
+## [0.4.0] - 2026-08-15
+
+### Changed
+
+- Settings UI converted to a permanent dark palette (no light fallbacks).
+
+## [0.3.3] - 2026-08-15
+
+### Added
+
+- Settings UI shows live status (provider + key source).
+
+## [0.3.2] - 2026-08-15
+
+### Fixed
+
+- Saving a key after startup now upgrades the stub tool to the real engine-backed
+  tool immediately (previously required a restart).
+
+## [0.3.1] - 2026-08-15
+
+### Added
+
+- "FREE 免费" badges on free-tier provider cards.
+- No-key warning banner in the settings UI.
+- Required marker on the API key field.
+
+### Fixed
+
+- Contrast issues in the settings UI (secondary text, placeholders).
+
+## [0.3.0] - 2026-08-15
+
+### Added
+
+- Settings UI v2: free-tier provider picker cards + collapsible advanced settings.
+- Graceful no-key degradation: a stub `image_understand` tool with a clear
+  Chinese/English message is registered instead of failing the plugin.
+
+### Fixed
+
+- `lumaEnv` rendering in the settings form.
+
+## [0.2.1] - 2026-08-15
+
+### Fixed
+
+- `webServer` route registration: use the `kind` + `path` format required by
+  the dsh host router (settings UI could not load config before).
+
+## [0.2.0] - 2026-08-15
+
+### Added
+
+- Settings UI: "Free Vision" section in `Settings` (client bundle + config API).
+- Persistent settings file (`~/.dsh/free-vision.json`), saved from the UI.
+- Save-takes-effect-immediately: the live engine reconnects with new settings.
+
+## [0.1.1] - 2026-08-15
+
+### Added
+
+- Plugin `Config` schema (schemastery) so the web GUI can render/validate settings.
+
+## [0.1.0] - 2026-08-15
+
+### Added
+
+- Initial release: `image_understand` vision tool for text-only dsh models,
+  powered by luma-mcp (free-tier providers: Qwen3-VL-Flash, Doubao, DeepSeek-OCR).
+- Zero MCP config: the vision engine ships as a package dependency, spawned in-process.
+- Proxy env vars stripped from the engine process (mainland-China API direct connect).
+
+[Unreleased]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.3.3...v0.4.0
+[0.3.3]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/FuzzySoul/dsh-free-vision/releases/tag/v0.1.0

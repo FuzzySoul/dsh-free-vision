@@ -1,5 +1,11 @@
 node_modules/
 *.log
 .DS_Store
-.npmrc
 *.tgz
+.npmrc
+
+# local settings (contains API keys - never commit)
+free-vision.json
+
+# test artifacts
+coverage/

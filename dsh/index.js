@@ -172,6 +172,13 @@ export function apply(ctx, config = {}) {
   // Live config: cordis patch config merged with the persistent settings
   // file (which the web settings UI writes). Re-read on every use so a
   // save from the settings page takes effect without a restart.
+  // Logger: use ctx.logger when available, fall back to console.
+  const log = {
+    info: (...a) => { try { ctx.logger?.info?.(...a) } catch { console.info(...a) } },
+    warn: (...a) => { try { ctx.logger?.warn?.(...a) } catch { console.warn(...a) } },
+    error: (...a) => { try { ctx.logger?.error?.(...a) } catch { console.error(...a) } },
+  }
+
   const getEffective = () => effectiveConfig(config)
   const provider = () => getEffective().modelProvider || 'qwen'
   const apiKey = () => keyFor(getEffective())
@@ -205,6 +212,7 @@ export function apply(ctx, config = {}) {
   // the plugin is gone for good; otherwise it only drops the current
   // connection so the next call reconnects with fresh settings.
   function teardown(final = true) {
+    clearTimeout(reconnectTimer)
     if (final) disposed = true
     for (const dispose of disposers.splice(0)) {
       try { dispose() } catch { /* ignore */ }
@@ -235,15 +243,20 @@ export function apply(ctx, config = {}) {
         env,
         stderr: 'pipe',
       })
+      // Auto-reconnect with exponential backoff when the engine process dies.
+      transport.onclose = () => scheduleReconnect('closed')
+      transport.onerror = (err) => scheduleReconnect('error: ' + (err?.message || err))
       // Forward luma-mcp's own logs (INFO/WARN/ERROR) to the harness console.
       if (transport.stderr) {
         transport.stderr.on('data', (chunk) => {
           const line = String(chunk).trim()
-          if (line) console.error(`[${label()}] ${line}`)
+          if (line) log.error(`[${label()}] ${line}`)
         })
       }
-      const newClient = new Client({ name: 'dsh-free-vision', version: '0.1.0' })
+      const newClient = new Client({ name: 'dsh-free-vision', version: '0.3.0' })
       await newClient.connect(transport)
+      reconnectAttempts = 0
+      clearTimeout(reconnectTimer)
       client = newClient
       return client
     })()
@@ -286,8 +299,29 @@ export function apply(ctx, config = {}) {
     try {
       disposers.push(ctx.tools.register(definition))
     } catch (error) {
-      console.error(`[${label()}] ${toolName()} stub registration skipped: ${error}`)
+      log.error(`[${label()}] ${toolName()} stub registration skipped: ${error}`)
     }
+  }
+
+  let reconnectTimer = null
+  let reconnectAttempts = 0
+
+  function scheduleReconnect(reason) {
+    if (disposed) return
+    clearTimeout(reconnectTimer)
+    const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000)
+    reconnectAttempts += 1
+    log.warn(`[${label()}] engine ${reason}, reconnecting in ${delay}ms (attempt ${reconnectAttempts})`)
+    reconnectTimer = setTimeout(() => {
+      client = null
+      transport = null
+      connecting = null
+      if (!disposed && apiKey()) {
+        syncTools().catch((error) => {
+          log.error(`[${label()}] reconnect failed: ${error?.message || error}`)
+        })
+      }
+    }, delay)
   }
 
   // Discover tools and register the generic image_understand tool.
@@ -346,7 +380,7 @@ export function apply(ctx, config = {}) {
       try {
         disposers.push(ctx.tools.register(definition))
       } catch (error) {
-        console.error(`[${label()}] ${toolName()} registration skipped: ${error}`)
+        log.error(`[${label()}] ${toolName()} registration skipped: ${error}`)
       }
     }
   }
@@ -359,7 +393,7 @@ export function apply(ctx, config = {}) {
   } else {
     // Fire-and-forget: tools appear once the vision engine is connected (a few seconds).
     syncTools().catch((error) => {
-      console.error(`[${label()}] connection failed, tools not registered: ${error?.message || error}`)
+      log.error(`[${label()}] connection failed, tools not registered: ${error?.message || error}`)
     })
   }
 
@@ -400,7 +434,7 @@ export function apply(ctx, config = {}) {
               teardown(false)
               if (apiKey()) {
                 syncTools().catch((error) => {
-                  console.error(`[${label()}] re-sync after save failed: ${error?.message || error}`)
+                  log.error(`[${label()}] re-sync after save failed: ${error?.message || error}`)
                 })
               }
               sendJson(res, 200, { ok: true, value: effectiveConfig(config), hasKey: !!apiKey() })
@@ -416,3 +450,6 @@ export function apply(ctx, config = {}) {
     })
   }
 }
+
+// Exported for unit tests (harmless to cordis).
+export { CONFIG_PATH, effectiveConfig, migrateKeys, keyFor, keySourceOf }
