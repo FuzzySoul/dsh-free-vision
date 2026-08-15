@@ -20,9 +20,59 @@
 // environment variables are deliberately stripped from the child process,
 // otherwise the API call fails (502 Bad Gateway).
 import { createRequire } from 'node:module'
+import z from '@deepseek-ai/schemastery'
 
 const require = createRequire(import.meta.url)
 const LUMA_ENTRY = require.resolve('luma-mcp') // -> build/index.js
+
+
+/** Plugin config schema — rendered as a form in the dsh web settings UI.
+ *  配置项会在 dsh web 设置界面中自动渲染为表单。 */
+export const Config = z.object({
+  apiKey: z
+    .string()
+    .description('API Key（缺省回退到对应提供商的环境变量，如 DASHSCOPE_API_KEY）/ API key; falls back to the provider env var')
+    .default(''),
+  modelProvider: z
+    .union([
+      z.const('qwen'),
+      z.const('volcengine'),
+      z.const('siliconflow'),
+      z.const('zhipu'),
+      z.const('hunyuan'),
+      z.const('custom'),
+    ])
+    .description('模型提供商 / provider (free tiers: qwen, volcengine, siliconflow)')
+    .default('qwen'),
+  modelName: z
+    .string()
+    .description('模型名覆盖，默认按提供商自动选择 / optional model override')
+    .default(''),
+  toolName: z
+    .string()
+    .description('工具公开名（与宿主冲突时改名）/ public tool name')
+    .default('image_understand'),
+  maxTokens: z
+    .number()
+    .description('最大生成 token 数 / max output tokens')
+    .default(8192),
+  temperature: z
+    .number()
+    .description('采样温度 / sampling temperature')
+    .default(0.7),
+  multiCrop: z
+    .boolean()
+    .description('大图自动多裁剪提升细节 / multi-crop large images')
+    .default(true),
+  toolCallTimeoutMs: z
+    .number()
+    .description('单次调用超时（毫秒）/ per-call timeout (ms)')
+    .default(200000),
+  lumaEnv: z
+    .dict(String)
+    .description('传递给视觉引擎的额外环境变量 / extra env vars for the engine')
+    .default({}),
+})
 
 const PROXY_VARS = [
   'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy',
