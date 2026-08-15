@@ -179,69 +179,72 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     }, () => react.createElement(Section)));
   }
 
+  // Dark theme throughout: some vision models / screenshot pipelines cannot
+  // read light-on-dark mixed panels, so every surface stays dark and text
+  // stays light regardless of the host theme variables.
   const st = {
-    card: { padding: "16px", maxWidth: 720 },
-    title: { margin: "0 0 6px", fontSize: 16, fontWeight: 600 },
-    hint: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #57606a)", margin: "0 0 10px" },
+    card: { padding: "16px", maxWidth: 720, color: "#e6edf3" },
+    title: { margin: "0 0 6px", fontSize: 16, fontWeight: 600, color: "#f0f6fc" },
+    hint: { fontSize: 12, color: "#9da7b3", margin: "0 0 10px" },
     statusOk: {
       margin: "0 0 12px", padding: "6px 12px", borderRadius: 8, fontSize: 13,
-      background: "var(--dsw-alias-success-bg, #dafbe1)", color: "var(--dsw-alias-success, #1a7f37)",
-      border: "1px solid var(--dsw-alias-success-border, #4ac26b)",
+      background: "#12291d", color: "#3fb950",
+      border: "1px solid #238636",
     },
     statusWarn: {
       margin: "0 0 12px", padding: "6px 12px", borderRadius: 8, fontSize: 13,
-      background: "var(--dsw-alias-warning-bg, #fff8c5)", color: "var(--dsw-alias-warning-fg, #7d4e00)",
-      border: "1px solid var(--dsw-alias-warning-border, #d4a72c)",
+      background: "#2d2410", color: "#d29922",
+      border: "1px solid #9e6a03",
     },
     warn: {
       margin: "0 0 12px", padding: "8px 12px", borderRadius: 8, fontSize: 13,
-      background: "var(--dsw-alias-warning-bg, #fff8c5)", color: "var(--dsw-alias-warning-fg, #7d4e00)",
-      border: "1px solid var(--dsw-alias-warning-border, #d4a72c)",
+      background: "#2d2410", color: "#d29922",
+      border: "1px solid #9e6a03",
     },
     grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, marginBottom: 14 },
     cardBtn: {
       textAlign: "left", padding: "10px", borderRadius: 8, cursor: "pointer",
-      border: "1px solid var(--dsw-alias-border, #d0d7de)",
-      background: "var(--dsw-alias-surface-2, #f6f8fa)", color: "inherit",
+      border: "1px solid #30363d",
+      background: "#161b22", color: "#e6edf3",
     },
     cardBtnOn: {
-      borderColor: "var(--dsw-alias-accent, #0969da)",
-      outline: "2px solid var(--dsw-alias-accent, #0969da)",
+      borderColor: "#58a6ff",
+      outline: "2px solid #1f6feb",
     },
     cardTop: { display: "flex", alignItems: "center", gap: 6, marginBottom: 3 },
-    cardName: { fontSize: 13, fontWeight: 600 },
+    cardName: { fontSize: 13, fontWeight: 600, color: "#f0f6fc" },
     badge: {
       fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
-      background: "var(--dsw-alias-success-bg, #dafbe1)", color: "var(--dsw-alias-success, #1a7f37)",
-      border: "1px solid var(--dsw-alias-success-border, #4ac26b)",
+      background: "#12291d", color: "#3fb950",
+      border: "1px solid #238636",
       whiteSpace: "nowrap",
     },
-    cardTag: { fontSize: 11, fontWeight: 500, color: "var(--dsw-alias-success, #1a7f37)", marginBottom: 2 },
-    cardDesc: { fontSize: 11, opacity: 0.85 },
-    cardEnv: { fontSize: 10, fontFamily: "monospace", opacity: 0.65, marginTop: 4 },
-    details: { margin: "4px 0 10px", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--dsw-alias-border, #d0d7de)" },
-    summary: { cursor: "pointer", fontSize: 13, fontWeight: 500 },
+    cardTag: { fontSize: 11, fontWeight: 500, color: "#3fb950", marginBottom: 2 },
+    cardDesc: { fontSize: 11, color: "#9da7b3" },
+    cardEnv: { fontSize: 10, fontFamily: "monospace", color: "#768390", marginTop: 4 },
+    details: { margin: "4px 0 10px", padding: "8px 10px", borderRadius: 8, border: "1px solid #30363d", background: "#0d1117" },
+    summary: { cursor: "pointer", fontSize: 13, fontWeight: 500, color: "#e6edf3" },
     field: { margin: "8px 0" },
-    label: { display: "block", fontSize: 12, fontWeight: 500, marginBottom: 3 },
-    required: { color: "var(--dsw-alias-danger, #cf222e)" },
+    label: { display: "block", fontSize: 12, fontWeight: 500, marginBottom: 3, color: "#c9d1d9" },
+    required: { color: "#f85149" },
     input: {
       width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 13,
-      borderRadius: 6, border: "1px solid var(--dsw-alias-border, #d0d7de)",
-      background: "var(--dsw-alias-surface-input, #fff)", color: "inherit",
+      borderRadius: 6, border: "1px solid #30363d",
+      background: "#0d1117", color: "#e6edf3",
     },
     textarea: {
       width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 12,
-      fontFamily: "monospace", borderRadius: 6, border: "1px solid var(--dsw-alias-border, #d0d7de)",
-      background: "var(--dsw-alias-surface-input, #fff)", color: "inherit",
+      fontFamily: "monospace", borderRadius: 6, border: "1px solid #30363d",
+      background: "#0d1117", color: "#e6edf3",
     },
     row: { display: "flex", alignItems: "center", gap: 10, marginTop: 10 },
     button: {
       padding: "6px 16px", fontSize: 13, borderRadius: 6, cursor: "pointer",
-      border: "1px solid var(--dsw-alias-border, #d0d7de)",
-      background: "var(--dsw-alias-accent, #0969da)", color: "#fff",
+      border: "1px solid #1f6feb",
+      background: "#1f6feb", color: "#ffffff",
     },
-    ok: { fontSize: 12, color: "var(--dsw-alias-success, #1a7f37)" },
-    error: { fontSize: 12, color: "var(--dsw-alias-danger, #cf222e)" },
+    ok: { fontSize: 12, color: "#3fb950" },
+    error: { fontSize: 12, color: "#f85149" },
   };
 
   exports.name = name;
