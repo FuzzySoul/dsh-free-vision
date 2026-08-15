@@ -1,0 +1,53 @@
+{
+  "name": "dsh-luma-vision",
+  "version": "0.1.0",
+  "description": "Vision bridge for DeepSeek Harness (dsh): image understanding for text-only models via luma-mcp, free Qwen3-VL-Flash by default. 视觉理解插件：让纯文本模型获得看图能力（截图/报错/OCR/UI 分析）。",
+  "type": "module",
+  "main": "./dsh/index.js",
+  "exports": {
+    ".": "./dsh/index.js",
+    "./dsh": "./dsh/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dsh",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "vision",
+    "image",
+    "mcp",
+    "luma",
+    "qwen",
+    "ocr",
+    "multimodal",
+    "image-to-text"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.25.3",
+    "luma-mcp": "^1.7.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FuzzySoul/dsh-luma-vision.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FuzzySoul/dsh-luma-vision/issues"
+  },
+  "homepage": "https://github.com/FuzzySoul/dsh-luma-vision#readme",
+  "author": "FuzzySoul"
+}

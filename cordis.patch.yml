@@ -1,0 +1,6 @@
+# dsh bundle layer: mount the luma vision plugin (dsh/index.js via the
+# package root export). The API key is read from the plugin config
+# (apiKey) or from the DASHSCOPE_API_KEY environment variable.
+- insert:
+    - id: luma-vision
+      name: 'dsh-luma-vision'
