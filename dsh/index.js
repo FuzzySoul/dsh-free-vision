@@ -224,6 +224,40 @@ export function apply(ctx, config = {}) {
     }
   }
 
+  // No API key yet: register a stub tool so the model still sees
+  // image_understand, but calls fail with a clear pointer to Settings
+  // instead of an opaque plugin error. The plugin itself always loads.
+  function registerStubTool() {
+    const definition = {
+      name: toolName(),
+      description:
+        'Analyze an image with a free-tier vision model (image understanding / OCR / UI / debug). ' +
+        '看图片/截图/报错/OCR/界面分析：传入图片路径、URL 或 base64。' +
+        ' (NOT CONFIGURED: set an API key in Settings → Free Vision first / 未配置：请先在 设置 → Free Vision 填写 API Key)',
+      parameters: {
+        type: 'object',
+        properties: {
+          image_source: { type: 'string', description: '图片路径 / HTTP(S) URL / data URI' },
+          prompt: { type: 'string', description: '对图片的问题（中英文均可）' },
+          task_type: { type: 'string', enum: ['auto', 'general', 'ocr', 'ui', 'debug', 'describe'] },
+        },
+        required: ['image_source', 'prompt'],
+      },
+      timeoutMs: 10_000,
+      isConcurrencySafe: () => true,
+      async execute() {
+        throw new Error(
+          `[${label()}] 未配置 API Key：请到 设置 → Free Vision 填写（qwen 用 DASHSCOPE_API_KEY，也可用火山/硅基流动免费 Key），保存后即可使用。`,
+        )
+      },
+    }
+    try {
+      disposers.push(ctx.tools.register(definition))
+    } catch (error) {
+      console.error(`[${label()}] ${toolName()} stub registration skipped: ${error}`)
+    }
+  }
+
   // Discover tools and register the generic image_understand tool.
   async function syncTools() {
     const live = await ensureConnected()
@@ -287,13 +321,15 @@ export function apply(ctx, config = {}) {
 
   if (!apiKey()) {
     console.warn(
-      `[${label()}] no API key: set config.apiKey or the ${PROVIDER_KEY_ENV[provider()] || 'DASHSCOPE_API_KEY'} environment variable; ${toolName()} will fail until a key is provided.`,
+      `[${label()}] no API key: stub tool registered; set one in Settings → Free Vision or via the ${PROVIDER_KEY_ENV[provider()] || 'DASHSCOPE_API_KEY'} environment variable.`,
     )
+    registerStubTool()
+  } else {
+    // Fire-and-forget: tools appear once the vision engine is connected (a few seconds).
+    syncTools().catch((error) => {
+      console.error(`[${label()}] connection failed, tools not registered: ${error?.message || error}`)
+    })
   }
-  // Fire-and-forget: tools appear once the vision engine is connected (a few seconds).
-  syncTools().catch((error) => {
-    console.error(`[${label()}] connection failed, tools not registered: ${error?.message || error}`)
-  })
 
   // ── Web settings UI (only under the web profile) ──────────────────────
   // GET  /dsh-free-vision/config -> { schema, value }
