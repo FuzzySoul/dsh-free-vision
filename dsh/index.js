@@ -100,6 +100,16 @@ function effectiveConfig(baseConfig) {
   return { ...baseConfig, ...readSettingsFile() }
 }
 
+/** Where the live API key comes from: settings file or environment. */
+function keySourceOf(baseConfig) {
+  const cfg = effectiveConfig(baseConfig)
+  if (cfg.apiKey) return 'file'
+  const provider = cfg.modelProvider || 'qwen'
+  const envName = PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY'
+  if (process.env[envName]) return 'env'
+  return 'none'
+}
+
 /** Persist settings (server side, called from the web UI route). */
 function writeSettingsFile(next) {
   mkdirSync(homedir() + '/.dsh', { recursive: true })
@@ -351,6 +361,7 @@ export function apply(ctx, config = {}) {
               schema: Config.toJSON(),
               value: getEffective(),
               hasKey: !!apiKey(),
+              keySource: keySourceOf(config),
             })
             return
           }

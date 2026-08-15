@@ -34,13 +34,13 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
 
   function Section() {
     const [state, setState] = react.useState({
-      loading: true, schema: null, value: {}, hasKey: false,
+      loading: true, schema: null, value: {}, hasKey: false, keySource: "none",
       saving: false, saved: false, error: "",
     });
     react.useEffect(() => {
       fetch("/dsh-free-vision/config", { cache: "no-store" })
         .then((r) => r.json())
-        .then((body) => setState((s) => ({ ...s, loading: false, schema: body.schema, value: body.value || {}, hasKey: !!body.hasKey })))
+        .then((body) => setState((s) => ({ ...s, loading: false, schema: body.schema, value: body.value || {}, hasKey: !!body.hasKey, keySource: body.keySource || "none" })))
         .catch((e) => setState((s) => ({ ...s, loading: false, error: String((e && e.message) || e) })));
     }, []);
 
@@ -66,6 +66,13 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
 
     const provider = state.value.modelProvider || "qwen";
     const keySet = !!(state.value.apiKey || state.hasKey);
+
+    const statusText = keySet
+      ? "● " + "当前生效：Qwen / 千问（" + (state.keySource === "env" ? "环境变量 DASHSCOPE_API_KEY" : "已保存的 API Key") + "）"
+      : "○ " + "未配置 API Key";
+    const status = react.createElement("div", {
+      style: keySet ? st.statusOk : st.statusWarn,
+    }, statusText);
 
     // Provider cards: free tiers get a highlighted badge
     const cards = PROVIDERS.map((p) => {
@@ -148,6 +155,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       react.createElement("h3", { style: st.title }, "Free Vision / 免费视觉"),
       react.createElement("p", { style: st.hint },
         "Pick a free-tier provider; the API key and fine-tuning live under advanced settings. / 选择免费模型提供商；API Key 与高级参数在下方高级设置中。"),
+      status,
       warning,
       react.createElement("div", { style: st.grid }, ...cards),
       advanced,
@@ -175,6 +183,16 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     card: { padding: "16px", maxWidth: 720 },
     title: { margin: "0 0 6px", fontSize: 16, fontWeight: 600 },
     hint: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #57606a)", margin: "0 0 10px" },
+    statusOk: {
+      margin: "0 0 12px", padding: "6px 12px", borderRadius: 8, fontSize: 13,
+      background: "var(--dsw-alias-success-bg, #dafbe1)", color: "var(--dsw-alias-success, #1a7f37)",
+      border: "1px solid var(--dsw-alias-success-border, #4ac26b)",
+    },
+    statusWarn: {
+      margin: "0 0 12px", padding: "6px 12px", borderRadius: 8, fontSize: 13,
+      background: "var(--dsw-alias-warning-bg, #fff8c5)", color: "var(--dsw-alias-warning-fg, #7d4e00)",
+      border: "1px solid var(--dsw-alias-warning-border, #d4a72c)",
+    },
     warn: {
       margin: "0 0 12px", padding: "8px 12px", borderRadius: 8, fontSize: 13,
       background: "var(--dsw-alias-warning-bg, #fff8c5)", color: "var(--dsw-alias-warning-fg, #7d4e00)",
