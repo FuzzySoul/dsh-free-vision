@@ -1,12 +1,13 @@
 {
   "name": "dsh-free-vision",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Free vision plugin for DeepSeek Harness (dsh): image understanding for text-only models with free-tier providers (Qwen3-VL-Flash / DeepSeek-OCR / Doubao). 免费视觉插件：纯文本模型看图能力，优先免费模型（通义千问 / 硅基流动 / 豆包）。",
   "type": "module",
   "main": "./dsh/index.js",
   "exports": {
     ".": "./dsh/index.js",
     "./dsh": "./dsh/index.js",
+    "./client": "./client/client.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -14,7 +15,8 @@
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
-    "README.zh-CN.md"
+    "README.zh-CN.md",
+    "client"
   ],
   "keywords": [
     "dsh",
@@ -44,6 +46,12 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
     }
   },
   "repository": {

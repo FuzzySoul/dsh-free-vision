@@ -20,6 +20,8 @@
 // environment variables are deliberately stripped from the child process,
 // otherwise the API call fails (502 Bad Gateway).
 import { createRequire } from 'node:module'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 
 const require = createRequire(import.meta.url)
@@ -79,6 +81,31 @@ const PROXY_VARS = [
   'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy',
 ]
 
+/** Persistent settings file (written by the web settings UI). */
+const CONFIG_PATH = homedir() + '/.dsh/free-vision.json'
+
+/** Read the persistent settings file; {} on any failure. */
+function readSettingsFile() {
+  try {
+    const raw = readFileSync(CONFIG_PATH, 'utf-8')
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Merge order: cordis patch config < persistent settings file. */
+function effectiveConfig(baseConfig) {
+  return { ...baseConfig, ...readSettingsFile() }
+}
+
+/** Persist settings (server side, called from the web UI route). */
+function writeSettingsFile(next) {
+  mkdirSync(homedir() + '/.dsh', { recursive: true })
+  writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf-8')
+}
+
 export const name = 'free-vision'
 export const inject = ['tools']
 
@@ -109,21 +136,31 @@ function extractText(content) {
 }
 
 export function apply(ctx, config = {}) {
-  const provider = config.modelProvider || 'qwen'
-  const apiKey = config.apiKey || process.env[PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY'] || ''
+  // Live config: cordis patch config merged with the persistent settings
+  // file (which the web settings UI writes). Re-read on every use so a
+  // save from the settings page takes effect without a restart.
+  const getEffective = () => effectiveConfig(config)
+  const provider = () => getEffective().modelProvider || 'qwen'
+  const apiKey = () =>
+    getEffective().apiKey || process.env[PROVIDER_KEY_ENV[provider()] || 'DASHSCOPE_API_KEY'] || ''
   // Generic tool name by default; override with config.toolName if the host
   // already mounts an image_understand tool.
-  const toolName = config.toolName || 'image_understand'
-  const label = `free-vision(${provider})`
+  const toolName = () => getEffective().toolName || 'image_understand'
+  const label = () => `free-vision(${provider()})`
 
-  const lumaEnv = {
-    MODEL_PROVIDER: provider,
-    ...(apiKey ? { [PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY']: apiKey } : {}),
-    ...(config.modelName ? { MODEL_NAME: config.modelName } : {}),
-    ...(config.maxTokens ? { MAX_TOKENS: String(config.maxTokens) } : {}),
-    ...(config.temperature != null ? { TEMPERATURE: String(config.temperature) } : {}),
-    ...(config.multiCrop === false ? { MULTI_CROP: 'false' } : {}),
-    ...(config.lumaEnv || {}),
+  const buildLumaEnv = () => {
+    const cfg = getEffective()
+    const prov = provider()
+    const key = apiKey()
+    return {
+      MODEL_PROVIDER: prov,
+      ...(key ? { [PROVIDER_KEY_ENV[prov] || 'DASHSCOPE_API_KEY']: key } : {}),
+      ...(cfg.modelName ? { MODEL_NAME: cfg.modelName } : {}),
+      ...(cfg.maxTokens ? { MAX_TOKENS: String(cfg.maxTokens) } : {}),
+      ...(cfg.temperature != null ? { TEMPERATURE: String(cfg.temperature) } : {}),
+      ...(cfg.multiCrop === false ? { MULTI_CROP: 'false' } : {}),
+      ...(cfg.lumaEnv || {}),
+    }
   }
 
   let client = null
@@ -132,8 +169,11 @@ export function apply(ctx, config = {}) {
   let disposed = false
   const disposers = []
 
-  function teardown() {
-    disposed = true
+  // Tear down the engine connection. When `final` is true (host dispose)
+  // the plugin is gone for good; otherwise it only drops the current
+  // connection so the next call reconnects with fresh settings.
+  function teardown(final = true) {
+    if (final) disposed = true
     for (const dispose of disposers.splice(0)) {
       try { dispose() } catch { /* ignore */ }
     }
@@ -145,17 +185,18 @@ export function apply(ctx, config = {}) {
       try { transport.close() } catch { /* ignore */ }
       transport = null
     }
+    connecting = null
   }
-  ctx.on('dispose', teardown)
+  ctx.on('dispose', () => teardown(true))
 
   async function ensureConnected() {
-    if (disposed) throw new Error(`${label}: plugin has been disposed`)
+    if (disposed) throw new Error(`${label()}: plugin has been disposed`)
     if (client) return client
     if (connecting) return connecting
     connecting = (async () => {
       const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
       const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js')
-      const env = buildChildEnv(lumaEnv)
+      const env = buildChildEnv(buildLumaEnv())
       transport = new StdioClientTransport({
         command: process.execPath,
         args: [LUMA_ENTRY],
@@ -166,7 +207,7 @@ export function apply(ctx, config = {}) {
       if (transport.stderr) {
         transport.stderr.on('data', (chunk) => {
           const line = String(chunk).trim()
-          if (line) console.error(`[${label}] ${line}`)
+          if (line) console.error(`[${label()}] ${line}`)
         })
       }
       const newClient = new Client({ name: 'dsh-free-vision', version: '0.1.0' })
@@ -189,7 +230,7 @@ export function apply(ctx, config = {}) {
     const { tools } = await live.listTools()
     for (const tool of tools) {
       const definition = {
-        name: toolName,
+        name: toolName(),
         description:
           'Analyze an image with a free-tier vision model (image understanding / OCR / UI / debug). ' +
           'Use whenever the model cannot see an image the user references: local file path, http(s) URL, ' +
@@ -215,7 +256,7 @@ export function apply(ctx, config = {}) {
         isConcurrencySafe: () => true,
         presentCall: (args) => ({
           card: 'generic',
-          title: toolName,
+          title: toolName(),
           kind: 'call',
           rawInput: args,
           ...(typeof args?.image_source === 'string' && !/^https?:\/\//i.test(args.image_source)
@@ -231,7 +272,7 @@ export function apply(ctx, config = {}) {
             { signal: exec.signal },
           )
           if (result.isError) {
-            throw new Error(extractText(result.content) || `${label}: ${tool.name} failed`)
+            throw new Error(extractText(result.content) || `${label()}: ${tool.name} failed`)
           }
           return result.structuredContent ?? { content: result.content ?? [] }
         },
@@ -239,18 +280,60 @@ export function apply(ctx, config = {}) {
       try {
         disposers.push(ctx.tools.register(definition))
       } catch (error) {
-        console.error(`[${label}] ${toolName} registration skipped: ${error}`)
+        console.error(`[${label()}] ${toolName()} registration skipped: ${error}`)
       }
     }
   }
 
-  if (!apiKey) {
+  if (!apiKey()) {
     console.warn(
-      `[${label}] no API key: set config.apiKey or the ${PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY'} environment variable; ${toolName} will fail until a key is provided.`,
+      `[${label()}] no API key: set config.apiKey or the ${PROVIDER_KEY_ENV[provider()] || 'DASHSCOPE_API_KEY'} environment variable; ${toolName()} will fail until a key is provided.`,
     )
   }
   // Fire-and-forget: tools appear once the vision engine is connected (a few seconds).
   syncTools().catch((error) => {
-    console.error(`[${label}] connection failed, tools not registered: ${error?.message || error}`)
+    console.error(`[${label()}] connection failed, tools not registered: ${error?.message || error}`)
   })
+
+  // ── Web settings UI (only under the web profile) ──────────────────────
+  // GET  /dsh-free-vision/config -> { schema, value }
+  // POST /dsh-free-vision/config -> save settings, drop the live engine so
+  //                                  the next call reconnects with them.
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['webServer'], (scope) => {
+      scope.webServer.register({
+        name: 'dsh-free-vision-config',
+        handler: async (req, res) => {
+          const url = new URL(req.url, 'http://localhost')
+          if (url.pathname !== '/dsh-free-vision/config') return false
+          if (req.method === 'GET') {
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify({ schema: Config.toJSON(), value: getEffective() }))
+            return true
+          }
+          if (req.method === 'POST') {
+            let body = ''
+            for await (const chunk of req) body += chunk
+            try {
+              const parsed = JSON.parse(body || '{}')
+              const next = parsed.config && typeof parsed.config === 'object' ? parsed.config : {}
+              writeSettingsFile(next)
+              // Drop the live connection so the next tool call reconnects
+              // with the new settings (save takes effect immediately).
+              teardown(false)
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ ok: true, value: effectiveConfig(config) }))
+              return true
+            } catch (error) {
+              res.statusCode = 400
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
+              return true
+            }
+          }
+          return false
+        },
+      })
+    })
+  }
 }

@@ -38,6 +38,16 @@ dsh plugin --profile web add dsh-free-vision
 Restart `dsh web`. The tool appears as `image_understand`.
 重启 `dsh web` 后，工具 `image_understand` 即可用。
 
+## Settings UI / 设置界面
+
+After restart, open **Settings → Free Vision** — a form for every config option
+(API key, provider, tool name, etc.) rendered from the plugin's schema.
+Changes are saved to `~/.dsh/free-vision.json` and take effect on the next
+tool call (no restart needed).
+
+重启 dsh web 后，打开 **设置 → Free Vision** 即可看到配置表单（API Key、提供商、
+工具名等），保存后下一次调用立即生效，无需重启。
+
 ## Configuration / 配置
 
 ```yaml
