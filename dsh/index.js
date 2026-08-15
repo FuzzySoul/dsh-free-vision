@@ -347,7 +347,11 @@ export function apply(ctx, config = {}) {
         path: '/dsh-free-vision/config',
         handler: async (req, res) => {
           if (req.method === 'GET') {
-            sendJson(res, 200, { schema: Config.toJSON(), value: getEffective() })
+            sendJson(res, 200, {
+              schema: Config.toJSON(),
+              value: getEffective(),
+              hasKey: !!apiKey(),
+            })
             return
           }
           if (req.method === 'POST') {

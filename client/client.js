@@ -1,8 +1,7 @@
-// dsh-free-vision web settings section (v0.3).
-// Provider quick-pick cards on top (free tiers highlighted), detailed
-// parameters inside a collapsed "Advanced settings" block. Saved via
-// POST /dsh-free-vision/config; the host drops the live engine so the
-// change applies to the next tool call immediately.
+// dsh-free-vision web settings section (v0.3.1).
+// Provider quick-pick cards (free tiers highlighted with a badge), a
+// warning banner when no API key is configured, and a collapsible
+// "Advanced settings" block. Saved via POST /dsh-free-vision/config.
 window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
   var module = { exports: {} };
   var exports = module.exports;
@@ -14,12 +13,12 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
   const inject = ["slots"];
 
   const PROVIDERS = [
-    { key: "qwen",        name: "Qwen / 千问", free: "百炼限免 50万 token", desc: "Qwen3-VL-Flash", env: "DASHSCOPE_API_KEY" },
-    { key: "volcengine",  name: "Doubao / 豆包", free: "火山免费 20万起",   desc: "豆包视觉模型",     env: "VOLCENGINE_API_KEY" },
-    { key: "siliconflow", name: "DeepSeek-OCR", free: "硅基流动免费",     desc: "OCR 专用",          env: "SILICONFLOW_API_KEY" },
-    { key: "zhipu",       name: "GLM / 智谱",    free: "按量",            desc: "GLM-4.6V",          env: "ZHIPU_API_KEY" },
-    { key: "hunyuan",     name: "Hunyuan / 混元", free: "按量",           desc: "HY-Vision",         env: "HUNYUAN_API_KEY" },
-    { key: "custom",      name: "Custom / 自定义", free: "任意 OpenAI 兼容", desc: "自建端点",       env: "CUSTOM_API_KEY" },
+    { key: "qwen",        name: "Qwen / 千问", free: true,  tag: "限免 50万 token",  desc: "Qwen3-VL-Flash",   env: "DASHSCOPE_API_KEY" },
+    { key: "volcengine",  name: "Doubao / 豆包", free: true, tag: "免费 20万起",      desc: "豆包视觉模型",     env: "VOLCENGINE_API_KEY" },
+    { key: "siliconflow", name: "DeepSeek-OCR", free: true,  tag: "免费 OCR",        desc: "硅基流动",         env: "SILICONFLOW_API_KEY" },
+    { key: "zhipu",       name: "GLM / 智谱",    free: false, tag: "按量",            desc: "GLM-4.6V",        env: "ZHIPU_API_KEY" },
+    { key: "hunyuan",     name: "Hunyuan / 混元", free: false, tag: "按量",           desc: "HY-Vision",       env: "HUNYUAN_API_KEY" },
+    { key: "custom",      name: "Custom / 自定义", free: false, tag: "OpenAI 兼容",   desc: "自建端点",        env: "CUSTOM_API_KEY" },
   ];
 
   const ADVANCED_LABELS = {
@@ -35,12 +34,13 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
 
   function Section() {
     const [state, setState] = react.useState({
-      loading: true, schema: null, value: {}, saving: false, saved: false, error: "",
+      loading: true, schema: null, value: {}, hasKey: false,
+      saving: false, saved: false, error: "",
     });
     react.useEffect(() => {
       fetch("/dsh-free-vision/config", { cache: "no-store" })
         .then((r) => r.json())
-        .then((body) => setState((s) => ({ ...s, loading: false, schema: body.schema, value: body.value || {} })))
+        .then((body) => setState((s) => ({ ...s, loading: false, schema: body.schema, value: body.value || {}, hasKey: !!body.hasKey })))
         .catch((e) => setState((s) => ({ ...s, loading: false, error: String((e && e.message) || e) })));
     }, []);
 
@@ -58,38 +58,54 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       })
         .then((r) => r.json())
         .then((body) => {
-          if (body.ok) setState((s) => ({ ...s, saving: false, saved: true, value: body.value || s.value }));
+          if (body.ok) setState((s) => ({ ...s, saving: false, saved: true, value: body.value || s.value, hasKey: !!body.value?.apiKey }));
           else setState((s) => ({ ...s, saving: false, error: body.error || "save failed" }));
         })
         .catch((e) => setState((s) => ({ ...s, saving: false, error: String((e && e.message) || e) })));
     };
 
     const provider = state.value.modelProvider || "qwen";
+    const keySet = !!(state.value.apiKey || state.hasKey);
 
-    // Provider cards
+    // Provider cards: free tiers get a highlighted badge
     const cards = PROVIDERS.map((p) => {
       const active = p.key === provider;
+      const badge = p.free
+        ? react.createElement("span", { style: st.badge }, "FREE 免费")
+        : null;
       return react.createElement("button", {
         key: p.key,
         onClick: () => set("modelProvider", p.key),
         style: { ...st.cardBtn, ...(active ? st.cardBtnOn : {}) },
       },
-        react.createElement("div", { style: st.cardName }, p.name + (active ? " ✓" : "")),
-        react.createElement("div", { style: st.cardFree }, p.free),
+        react.createElement("div", { style: st.cardTop },
+          react.createElement("span", { style: st.cardName }, p.name + (active ? " ✓" : "")),
+          badge,
+        ),
+        react.createElement("div", { style: st.cardTag }, p.tag),
         react.createElement("div", { style: st.cardDesc }, p.desc),
         react.createElement("div", { style: st.cardEnv }, p.env),
       );
     });
 
+    // No-key warning banner
+    const warning = keySet ? null : react.createElement("div", { style: st.warn },
+      "⚠ " + "未配置 API Key：图片分析暂不可用，请在下方高级设置中填写（或设置环境变量后重启）。",
+    );
+
     // Advanced fields
-    const adv = (label, control) =>
+    const adv = (label, required, control) =>
       react.createElement("div", { style: st.field },
-        react.createElement("label", { style: st.label }, label),
+        react.createElement("label", { style: st.label },
+          label,
+          required ? react.createElement("span", { style: st.required }, " *") : null,
+        ),
         control);
 
     const input = (k, type) => react.createElement("input", {
       type: type || "text",
       value: state.value[k] == null ? "" : String(state.value[k]),
+      placeholder: type === "number" ? "" : (k === "apiKey" ? "sk-..." : ""),
       style: st.input,
       onChange: (e) => {
         if (type === "number") set(k, e.target.value === "" ? undefined : Number(e.target.value));
@@ -101,37 +117,38 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       onChange: (e) => set(k, e.target.checked),
     });
 
-    const apiKeyField = adv("API Key", input("apiKey"));
-    const modelNameField = adv(ADVANCED_LABELS.modelName, input("modelName"));
-    const toolNameField = adv(ADVANCED_LABELS.toolName, input("toolName"));
-    const maxTokensField = adv(ADVANCED_LABELS.maxTokens, input("maxTokens", "number"));
-    const tempField = adv(ADVANCED_LABELS.temperature, input("temperature", "number"));
-    const cropField = adv(ADVANCED_LABELS.multiCrop, toggle("multiCrop"));
-    const timeoutField = adv(ADVANCED_LABELS.toolCallTimeoutMs, input("toolCallTimeoutMs", "number"));
-    const envField = adv(ADVANCED_LABELS.lumaEnv, react.createElement("textarea", {
-      rows: 3, style: st.textarea,
-      value: (() => {
-        const v = state.value.lumaEnv;
-        if (v == null || v === "") return "";
-        if (typeof v === "string") return v;
-        try { return JSON.stringify(v, null, 2); } catch { return ""; }
-      })(),
-      onChange: (e) => {
-        const raw = e.target.value.trim();
-        if (!raw) { set("lumaEnv", {}); return; }
-        try { set("lumaEnv", JSON.parse(raw)); } catch { /* keep last valid */ }
-      },
-    }));
-
-    const advanced = react.createElement("details", { style: st.details },
-      react.createElement("summary", { style: st.summary }, "⚙ Advanced settings / 高级设置"),
-      apiKeyField, modelNameField, toolNameField, maxTokensField, tempField, cropField, timeoutField, envField,
+    const advanced = react.createElement("details", { style: st.details, open: !keySet },
+      react.createElement("summary", { style: st.summary },
+        "⚙ " + "Advanced settings / 高级设置" + (keySet ? "" : " (需要配置 API Key)"),
+      ),
+      adv(ADVANCED_LABELS.apiKey, true, input("apiKey")),
+      adv(ADVANCED_LABELS.modelName, false, input("modelName")),
+      adv(ADVANCED_LABELS.toolName, false, input("toolName")),
+      adv(ADVANCED_LABELS.maxTokens, false, input("maxTokens", "number")),
+      adv(ADVANCED_LABELS.temperature, false, input("temperature", "number")),
+      adv(ADVANCED_LABELS.multiCrop, false, toggle("multiCrop")),
+      adv(ADVANCED_LABELS.toolCallTimeoutMs, false, input("toolCallTimeoutMs", "number")),
+      adv(ADVANCED_LABELS.lumaEnv, false, react.createElement("textarea", {
+        rows: 3, style: st.textarea,
+        value: (() => {
+          const v = state.value.lumaEnv;
+          if (v == null || v === "") return "";
+          if (typeof v === "string") return v;
+          try { return JSON.stringify(v, null, 2); } catch { return ""; }
+        })(),
+        onChange: (e) => {
+          const raw = e.target.value.trim();
+          if (!raw) { set("lumaEnv", {}); return; }
+          try { set("lumaEnv", JSON.parse(raw)); } catch { /* keep last valid */ }
+        },
+      })),
     );
 
     return react.createElement("div", { style: st.card },
       react.createElement("h3", { style: st.title }, "Free Vision / 免费视觉"),
       react.createElement("p", { style: st.hint },
-        "Pick a free-tier provider, or open advanced settings for the API key and fine-tuning. / 选择免费模型提供商；API Key 与高级参数在下方高级设置中。"),
+        "Pick a free-tier provider; the API key and fine-tuning live under advanced settings. / 选择免费模型提供商；API Key 与高级参数在下方高级设置中。"),
+      warning,
       react.createElement("div", { style: st.grid }, ...cards),
       advanced,
       react.createElement("div", { style: st.row },
@@ -157,7 +174,12 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
   const st = {
     card: { padding: "16px", maxWidth: 720 },
     title: { margin: "0 0 6px", fontSize: 16, fontWeight: 600 },
-    hint: { fontSize: 12, color: "var(--dsw-alias-label-tertiary, #666)", margin: "0 0 12px" },
+    hint: { fontSize: 12, color: "var(--dsw-alias-label-secondary, #57606a)", margin: "0 0 10px" },
+    warn: {
+      margin: "0 0 12px", padding: "8px 12px", borderRadius: 8, fontSize: 13,
+      background: "var(--dsw-alias-warning-bg, #fff8c5)", color: "var(--dsw-alias-warning-fg, #7d4e00)",
+      border: "1px solid var(--dsw-alias-warning-border, #d4a72c)",
+    },
     grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, marginBottom: 14 },
     cardBtn: {
       textAlign: "left", padding: "10px", borderRadius: 8, cursor: "pointer",
@@ -168,14 +190,22 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       borderColor: "var(--dsw-alias-accent, #0969da)",
       outline: "2px solid var(--dsw-alias-accent, #0969da)",
     },
-    cardName: { fontSize: 13, fontWeight: 600, marginBottom: 2 },
-    cardFree: { fontSize: 11, color: "var(--dsw-alias-success, #1a7f37)", marginBottom: 2 },
-    cardDesc: { fontSize: 11, opacity: 0.8 },
-    cardEnv: { fontSize: 10, fontFamily: "monospace", opacity: 0.6, marginTop: 4 },
+    cardTop: { display: "flex", alignItems: "center", gap: 6, marginBottom: 3 },
+    cardName: { fontSize: 13, fontWeight: 600 },
+    badge: {
+      fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 999,
+      background: "var(--dsw-alias-success-bg, #dafbe1)", color: "var(--dsw-alias-success, #1a7f37)",
+      border: "1px solid var(--dsw-alias-success-border, #4ac26b)",
+      whiteSpace: "nowrap",
+    },
+    cardTag: { fontSize: 11, fontWeight: 500, color: "var(--dsw-alias-success, #1a7f37)", marginBottom: 2 },
+    cardDesc: { fontSize: 11, opacity: 0.85 },
+    cardEnv: { fontSize: 10, fontFamily: "monospace", opacity: 0.65, marginTop: 4 },
     details: { margin: "4px 0 10px", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--dsw-alias-border, #d0d7de)" },
     summary: { cursor: "pointer", fontSize: 13, fontWeight: 500 },
     field: { margin: "8px 0" },
     label: { display: "block", fontSize: 12, fontWeight: 500, marginBottom: 3 },
+    required: { color: "var(--dsw-alias-danger, #cf222e)" },
     input: {
       width: "100%", boxSizing: "border-box", padding: "6px 8px", fontSize: 13,
       borderRadius: 6, border: "1px solid var(--dsw-alias-border, #d0d7de)",
