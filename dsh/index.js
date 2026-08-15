@@ -361,10 +361,16 @@ export function apply(ctx, config = {}) {
               const parsed = JSON.parse(body || '{}')
               const next = parsed.config && typeof parsed.config === 'object' ? parsed.config : {}
               writeSettingsFile(next)
-              // Drop the live connection so the next tool call reconnects
-              // with the new settings (save takes effect immediately).
+              // Drop the live connection and re-sync tools: if the plugin
+              // started without a key (stub tool), saving one upgrades the
+              // stub to the real engine-backed tool right away.
               teardown(false)
-              sendJson(res, 200, { ok: true, value: effectiveConfig(config) })
+              if (apiKey()) {
+                syncTools().catch((error) => {
+                  console.error(`[${label()}] re-sync after save failed: ${error?.message || error}`)
+                })
+              }
+              sendJson(res, 200, { ok: true, value: effectiveConfig(config), hasKey: !!apiKey() })
             } catch (error) {
               sendJson(res, 400, { ok: false, error: String(error?.message || error) })
             }
