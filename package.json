@@ -1,7 +1,7 @@
 {
-  "name": "dsh-luma-vision",
+  "name": "dsh-free-vision",
   "version": "0.1.0",
-  "description": "Vision bridge for DeepSeek Harness (dsh): image understanding for text-only models via luma-mcp, free Qwen3-VL-Flash by default. 视觉理解插件：让纯文本模型获得看图能力（截图/报错/OCR/UI 分析）。",
+  "description": "Free vision plugin for DeepSeek Harness (dsh): image understanding for text-only models with free-tier providers (Qwen3-VL-Flash / DeepSeek-OCR / Doubao). 免费视觉插件：纯文本模型看图能力，优先免费模型（通义千问 / 硅基流动 / 豆包）。",
   "type": "module",
   "main": "./dsh/index.js",
   "exports": {
@@ -13,7 +13,8 @@
     "dsh",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "README.zh-CN.md"
   ],
   "keywords": [
     "dsh",
@@ -21,12 +22,15 @@
     "plugin",
     "vision",
     "image",
-    "mcp",
-    "luma",
+    "free",
     "qwen",
+    "doubao",
+    "volcengine",
+    "siliconflow",
     "ocr",
     "multimodal",
-    "image-to-text"
+    "image-to-text",
+    "visual"
   ],
   "license": "MIT",
   "engines": {
@@ -43,11 +47,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/FuzzySoul/dsh-luma-vision.git"
+    "url": "git+https://github.com/FuzzySoul/dsh-free-vision.git"
   },
   "bugs": {
-    "url": "https://github.com/FuzzySoul/dsh-luma-vision/issues"
+    "url": "https://github.com/FuzzySoul/dsh-free-vision/issues"
   },
-  "homepage": "https://github.com/FuzzySoul/dsh-luma-vision#readme",
+  "homepage": "https://github.com/FuzzySoul/dsh-free-vision#readme",
   "author": "FuzzySoul"
 }

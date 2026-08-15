@@ -1,17 +1,24 @@
-// DeepSeek Harness (dsh) plugin: vision bridge for text-only models.
-// Spawns luma-mcp from this package's own dependency tree (no npx, no
-// PATH lookup — the plugin and its engine version-lock together) and
-// registers its image_understand tool on ctx.tools as
-// `luma__image_understand`, so text-only dsh models can read screenshots,
-// code errors, UI layouts, documents and photos.
+// DeepSeek Harness (dsh) plugin: FREE vision bridge for text-only models.
+// 免费视觉理解插件：让纯文本模型获得看图能力。
 //
-// Loaded via the cordis.patch.yml row `dsh-luma-vision` (see package.json
+// Spawns luma-mcp from this package's own dependency tree (no npx, no
+// PATH lookup) and registers its image_understand tool on ctx.tools, so
+// text-only dsh models can read screenshots, code errors, UI layouts,
+// documents and photos — powered by free-tier vision models:
+//
+//   - qwen        (default) Qwen3-VL-Flash      阿里云百炼限免模型（50万 token 起）
+//   - siliconflow           DeepSeek-OCR        硅基流动 OCR（免费）
+//   - volcengine            Doubao 视觉模型      火山引擎豆包（20万~50万 token 免费）
+//   - zhipu                 GLM-4.6V            智谱
+//   - hunyuan               HY-Vision           腾讯混元
+//   - custom                任意 OpenAI 兼容端点
+//
+// Loaded via the cordis.patch.yml row `dsh-free-vision` (see package.json
 // `dsh.bundle` manifest). The API key comes from the plugin config
-// (`apiKey`) or the DASHSCOPE_API_KEY environment variable. The default
-// provider is Qwen (qwen3-vl-flash, free tier); dashscope.aliyuncs.com is a
-// mainland-China endpoint and must be reached directly — proxy environment
-// variables are deliberately stripped from the child process, otherwise
-// luma-mcp fails with 502 (Bad Gateway).
+// (`apiKey`) or the provider's environment variable. All these endpoints
+// are mainland-China services and must be reached directly — proxy
+// environment variables are deliberately stripped from the child process,
+// otherwise the API call fails (502 Bad Gateway).
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
@@ -22,8 +29,18 @@ const PROXY_VARS = [
   'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy',
 ]
 
-export const name = 'luma-vision'
+export const name = 'free-vision'
 export const inject = ['tools']
+
+/** Provider -> API key env variable. */
+const PROVIDER_KEY_ENV = {
+  zhipu: 'ZHIPU_API_KEY',
+  siliconflow: 'SILICONFLOW_API_KEY',
+  qwen: 'DASHSCOPE_API_KEY',
+  volcengine: 'VOLCENGINE_API_KEY',
+  hunyuan: 'HUNYUAN_API_KEY',
+  custom: 'CUSTOM_API_KEY',
+}
 
 /** Build the child environment: host env minus proxy vars plus luma config. */
 function buildChildEnv(lumaEnv) {
@@ -42,14 +59,16 @@ function extractText(content) {
 }
 
 export function apply(ctx, config = {}) {
-  const apiKey = config.apiKey || process.env.DASHSCOPE_API_KEY || ''
   const provider = config.modelProvider || 'qwen'
-  const prefix = config.toolPrefix || 'luma'
-  const label = `luma-vision(${provider})`
+  const apiKey = config.apiKey || process.env[PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY'] || ''
+  // Generic tool name by default; override with config.toolName if the host
+  // already mounts an image_understand tool.
+  const toolName = config.toolName || 'image_understand'
+  const label = `free-vision(${provider})`
 
   const lumaEnv = {
     MODEL_PROVIDER: provider,
-    ...(apiKey ? { DASHSCOPE_API_KEY: apiKey } : {}),
+    ...(apiKey ? { [PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY']: apiKey } : {}),
     ...(config.modelName ? { MODEL_NAME: config.modelName } : {}),
     ...(config.maxTokens ? { MAX_TOKENS: String(config.maxTokens) } : {}),
     ...(config.temperature != null ? { TEMPERATURE: String(config.temperature) } : {}),
@@ -100,7 +119,7 @@ export function apply(ctx, config = {}) {
           if (line) console.error(`[${label}] ${line}`)
         })
       }
-      const newClient = new Client({ name: 'dsh-luma-vision', version: '0.1.0' })
+      const newClient = new Client({ name: 'dsh-free-vision', version: '0.1.0' })
       await newClient.connect(transport)
       client = newClient
       return client
@@ -114,15 +133,19 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  // Discover tools and register them under `<prefix>__<rawName>`.
+  // Discover tools and register the generic image_understand tool.
   async function syncTools() {
     const live = await ensureConnected()
     const { tools } = await live.listTools()
     for (const tool of tools) {
-      const publicName = `${prefix}__${tool.name}`
       const definition = {
-        name: publicName,
-        description: tool.description || `Analyze an image with the ${tool.name} vision tool.`,
+        name: toolName,
+        description:
+          'Analyze an image with a free-tier vision model (image understanding / OCR / UI / debug). ' +
+          'Use whenever the model cannot see an image the user references: local file path, http(s) URL, ' +
+          'or data URI of a screenshot, code error, UI layout, document or photo. ' +
+          '看图片/截图/报错/OCR/界面分析：传入图片路径、URL 或 base64（PNG/JPG/WebP/GIF，最大约10MB），' +
+          '配合 prompt 提问与 task_type 任务类型。',
         parameters: tool.inputSchema || { type: 'object', properties: {} },
         output: {
           schema: {
@@ -142,7 +165,7 @@ export function apply(ctx, config = {}) {
         isConcurrencySafe: () => true,
         presentCall: (args) => ({
           card: 'generic',
-          title: publicName,
+          title: toolName,
           kind: 'call',
           rawInput: args,
           ...(typeof args?.image_source === 'string' && !/^https?:\/\//i.test(args.image_source)
@@ -166,15 +189,17 @@ export function apply(ctx, config = {}) {
       try {
         disposers.push(ctx.tools.register(definition))
       } catch (error) {
-        console.error(`[${label}] ${publicName} registration skipped: ${error}`)
+        console.error(`[${label}] ${toolName} registration skipped: ${error}`)
       }
     }
   }
 
   if (!apiKey) {
-    console.warn(`[${label}] no API key: set config.apiKey or the DASHSCOPE_API_KEY environment variable; image_understand will fail until a key is provided.`)
+    console.warn(
+      `[${label}] no API key: set config.apiKey or the ${PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY'} environment variable; ${toolName} will fail until a key is provided.`,
+    )
   }
-  // Fire-and-forget: tools appear once luma-mcp is connected (a few seconds).
+  // Fire-and-forget: tools appear once the vision engine is connected (a few seconds).
   syncTools().catch((error) => {
     console.error(`[${label}] connection failed, tools not registered: ${error?.message || error}`)
   })

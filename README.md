@@ -1,80 +1,95 @@
-# dsh-luma-vision
+# dsh-free-vision
 
-Vision bridge plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh): gives text-only models the ability to read images — screenshots, code errors, UI layouts, documents, OCR — by spawning [luma-mcp](https://github.com/JochenYang/luma-mcp) from this package's own dependency tree and registering its `image_understand` tool as a native dsh tool.
+**Free vision plugin for DeepSeek Harness (dsh)** — gives text-only models the ability to read images (screenshots, code errors, UI layouts, documents, OCR) using **free-tier vision models**, with zero MCP configuration.
 
-DSH 视觉理解插件：让纯文本模型获得看图能力（截图、报错、OCR、UI 分析），无需在 `cordis.patch.yml` 手动配置 MCP 服务器。
+DSH 免费视觉插件：让纯文本模型获得看图能力，优先使用各平台免费视觉模型，无需手动配置 MCP。
 
-## Features
+## Why free? / 为什么免费
 
-- **Zero MCP config** — no `cordis.patch.yml` edits, no `npx` at runtime: the plugin version-locks luma-mcp as its own dependency and spawns it in-process
-- **Single tool** — `luma__image_understand` is registered on `ctx.tools` and reaches the model on every request
-- **Free by default** — Qwen3-VL-Flash (阿里云百炼限免模型); switch providers via config (Zhipu / SiliconFlow / Qwen / Volcengine / Hunyuan / custom)
-- **Direct connection** — proxy env vars are stripped from the child process so dashscope (mainland China) is reached directly (a stray proxy causes 502)
+The plugin defaults to providers with generous free quotas — no billing surprises:
+
+| Provider | Model | Free quota | API key env |
+| --- | --- | --- | --- |
+| **qwen** (default) | Qwen3-VL-Flash | 阿里云百炼限免（激活送 50万 token） | `DASHSCOPE_API_KEY` |
+| **volcengine** | Doubao 视觉模型 | 火山引擎豆包免费 token（20万，可申请 50万） | `VOLCENGINE_API_KEY` |
+| **siliconflow** | DeepSeek-OCR | 硅基流动 OCR 免费 | `SILICONFLOW_API_KEY` |
+| zhipu | GLM-4.6V | 按量 | `ZHIPU_API_KEY` |
+| hunyuan | HY-Vision | 按量 | `HUNYUAN_API_KEY` |
+| custom | any OpenAI-compatible | — | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` + `CUSTOM_MODEL_NAME` |
+
+One 1MB screenshot ≈ 2,600 tokens ≈ **$0.0006** on qwen; free quota covers ~190,000 images.
+一张 1MB 截图 ≈ 2600 token，qwen 限免额度可分析约 19 万张图。
+
+## Features / 特性
+
+- **Zero MCP config** — no `cordis.patch.yml` edits, no `npx` at runtime: the vision engine (luma-mcp) ships as this package's own dependency and is spawned in-process
+- **Single generic tool** — `image_understand` (rename via `config.toolName`) is registered on `ctx.tools` and reaches the model on every request
+- **Free-first multi-provider** — qwen / volcengine / siliconflow free tiers out of the box; zhipu / hunyuan / custom for anything else
+- **Direct connection** — proxy env vars are stripped from the child process so mainland-China API endpoints are reached directly (a stray proxy causes 502)
 - **Task modes** — `auto | general | ocr | ui | debug | describe`; big images are auto multi-cropped for detail fidelity
+- **Bilingual** — descriptions and docs work for both English and Chinese prompts
 
-## Install
+## Install / 安装
 
 ```sh
-# from the market (once listed) or directly:
-dsh plugin --profile web add dsh-luma-vision
+dsh plugin --profile web add dsh-free-vision
 ```
 
-Restart `dsh web`. The tool appears as `luma__image_understand`.
+Restart `dsh web`. The tool appears as `image_understand`.
+重启 `dsh web` 后，工具 `image_understand` 即可用。
 
-## Configuration
-
-Set the API key via the plugin config (in `cordis.patch.yml`) or the `DASHSCOPE_API_KEY` environment variable:
+## Configuration / 配置
 
 ```yaml
-- id: luma-vision
-  name: 'dsh-luma-vision'
+- id: free-vision
+  name: 'dsh-free-vision'
   config:
-    apiKey: 'sk-xxxx'          # required; falls back to DASHSCOPE_API_KEY env
-    modelProvider: qwen        # zhipu | siliconflow | qwen | volcengine | hunyuan | custom
-    modelName: qwen3-vl-flash  # optional override
-    toolPrefix: luma           # tool public name: <prefix>__image_understand
-    maxTokens: 8192            # optional
-    temperature: 0.7           # optional
-    multiCrop: true            # set false to disable multi-crop on large images
-    toolCallTimeoutMs: 200000  # per-call timeout
-    lumaEnv: {}                # extra env vars passed to luma-mcp
+    apiKey: 'sk-xxxx'        # optional: falls back to the provider env var
+    modelProvider: qwen      # qwen | volcengine | siliconflow | zhipu | hunyuan | custom
+    modelName: qwen3-vl-flash # optional model override
+    toolName: image_understand # tool public name (rename if it collides)
+    maxTokens: 8192
+    temperature: 0.7
+    multiCrop: true
+    toolCallTimeoutMs: 200000
+    lumaEnv: {}              # extra env vars for the vision engine
 ```
 
-Provider → API key env (per [luma-mcp](https://github.com/JochenYang/luma-mcp)):
+Or just set the matching environment variable (e.g. `DASHSCOPE_API_KEY`).
+也可以只设置对应的环境变量（如 `DASHSCOPE_API_KEY`）。
 
-| `modelProvider` | key variable | default model |
-| --- | --- | --- |
-| `zhipu` | `ZHIPU_API_KEY` | glm-4.6v |
-| `siliconflow` | `SILICONFLOW_API_KEY` | deepseek-ai/DeepSeek-OCR (free) |
-| `qwen` (default) | `DASHSCOPE_API_KEY` | qwen3-vl-flash (free tier) |
-| `volcengine` | `VOLCENGINE_API_KEY` | doubao-seed-1-6-flash-250828 |
-| `hunyuan` | `HUNYUAN_API_KEY` | hunyuan-t1-vision-20250916 |
-| `custom` | `CUSTOM_API_KEY` + `CUSTOM_BASE_URL` + `CUSTOM_MODEL_NAME` | — |
+### Free API keys / 免费 Key 申请
 
-## Usage
+| Provider | Where to get a free key |
+| --- | --- |
+| qwen | 阿里云百炼 bailian.console.aliyun.com — 开通即送免费额度，模型选择 qwen3-vl-flash（限免） |
+| volcengine | 火山引擎 volcengine.com — 豆包模型新用户送免费 token（20万起，可申请 50万） |
+| siliconflow | 硅基流动 siliconflow.cn — DeepSeek-OCR 免费调用 |
 
-The model calls `luma__image_understand` with:
+## Usage / 用法
+
+The model calls `image_understand` with:
 
 - `image_source` (required): local file path, HTTP(S) URL, or data URI (PNG/JPG/WebP/GIF, ≤10MB)
-- `prompt` (required): the user's question about the image
+- `prompt` (required): the question about the image — works in English or Chinese
 - `task_type` (optional): `auto | general | ocr | ui | debug | describe`
 
-## How it works
+## How it works / 工作原理
 
 ```
-dsh web → cordis loads luma-vision → spawns luma-mcp (node build/index.js, in-process)
-→ MCP connect → tools/list → registers luma__image_understand on ctx.tools
-→ model calls the tool → luma preprocesses (compress / multi-crop) → dashscope API (direct)
+dsh web → cordis loads free-vision → spawns the vision engine (in-process, version-locked)
+→ MCP connect → registers image_understand on ctx.tools
+→ model calls the tool → engine preprocesses (compress / multi-crop) → free vision API (direct)
 → returns text evidence
 ```
 
-## Development
+## Development / 开发
 
 ```sh
 npm install
-node test-plugin.mjs   # end-to-end smoke test (needs DASHSCOPE_API_KEY env)
+node test-plugin.mjs   # end-to-end smoke test (needs an API key env)
 ```
 
 ## License
 
-MIT — this plugin wraps [luma-mcp](https://github.com/JochenYang/luma-mcp) (MIT) and the MCP SDK (MIT).
+MIT — wraps [luma-mcp](https://github.com/JochenYang/luma-mcp) (MIT) and the MCP SDK (MIT). Free-quota figures are from the providers' official pages and may change; check before relying on them.

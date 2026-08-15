@@ -24,13 +24,13 @@ apply(ctx, config)
 
 // wait for connection + tool sync (luma spawns in ~1-3s)
 for (let i = 0; i < 40; i++) {
-  if (registered.has('luma__image_understand')) break
+  if (registered.has('image_understand')) break
   await new Promise((r) => setTimeout(r, 500))
 }
 
-const tool = registered.get('luma__image_understand')
+const tool = registered.get('image_understand')
 if (!tool) {
-  console.error('FAIL: luma__image_understand not registered')
+  console.error('FAIL: image_understand not registered')
   process.exit(1)
 }
 console.log('registered tool:', tool.name)
