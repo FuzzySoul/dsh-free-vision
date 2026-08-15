@@ -299,17 +299,20 @@ export function apply(ctx, config = {}) {
   // GET  /dsh-free-vision/config -> { schema, value }
   // POST /dsh-free-vision/config -> save settings, drop the live engine so
   //                                  the next call reconnects with them.
+  // dsh-market style: kind + path are how the host router matches routes.
   if (typeof ctx.inject === 'function') {
     ctx.inject(['webServer'], (scope) => {
+      const sendJson = (res, status, body) => {
+        res.writeHead(status, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(body))
+      }
       scope.webServer.register({
-        name: 'dsh-free-vision-config',
+        kind: 'exact',
+        path: '/dsh-free-vision/config',
         handler: async (req, res) => {
-          const url = new URL(req.url, 'http://localhost')
-          if (url.pathname !== '/dsh-free-vision/config') return false
           if (req.method === 'GET') {
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ schema: Config.toJSON(), value: getEffective() }))
-            return true
+            sendJson(res, 200, { schema: Config.toJSON(), value: getEffective() })
+            return
           }
           if (req.method === 'POST') {
             let body = ''
@@ -321,17 +324,14 @@ export function apply(ctx, config = {}) {
               // Drop the live connection so the next tool call reconnects
               // with the new settings (save takes effect immediately).
               teardown(false)
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ ok: true, value: effectiveConfig(config) }))
-              return true
+              sendJson(res, 200, { ok: true, value: effectiveConfig(config) })
             } catch (error) {
-              res.statusCode = 400
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ ok: false, error: String(error?.message || error) }))
-              return true
+              sendJson(res, 400, { ok: false, error: String(error?.message || error) })
             }
+            return
           }
-          return false
+          res.writeHead(405, { allow: 'GET, POST' })
+          res.end()
         },
       })
     })
