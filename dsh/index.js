@@ -100,11 +100,34 @@ function effectiveConfig(baseConfig) {
   return { ...baseConfig, ...readSettingsFile() }
 }
 
+/** Migrate the old flat apiKey into the per-provider keys map. */
+function migrateKeys(cfg) {
+  if (cfg.apiKey && !cfg.keys) {
+    const provider = cfg.modelProvider || 'qwen'
+    return { ...cfg, keys: { [provider]: cfg.apiKey } }
+  }
+  return cfg
+}
+
+/** Live key for the active provider: keys[provider] > legacy apiKey > env. */
+function keyFor(cfg) {
+  const migrated = migrateKeys(cfg)
+  const provider = migrated.modelProvider || 'qwen'
+  const envName = PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY'
+  return (
+    (migrated.keys && migrated.keys[provider]) ||
+    migrated.apiKey ||
+    process.env[envName] ||
+    ''
+  )
+}
+
 /** Where the live API key comes from: settings file or environment. */
 function keySourceOf(baseConfig) {
-  const cfg = effectiveConfig(baseConfig)
-  if (cfg.apiKey) return 'file'
+  const cfg = migrateKeys(effectiveConfig(baseConfig))
   const provider = cfg.modelProvider || 'qwen'
+  if (cfg.keys && cfg.keys[provider]) return 'file'
+  if (cfg.apiKey) return 'file'
   const envName = PROVIDER_KEY_ENV[provider] || 'DASHSCOPE_API_KEY'
   if (process.env[envName]) return 'env'
   return 'none'
@@ -151,8 +174,7 @@ export function apply(ctx, config = {}) {
   // save from the settings page takes effect without a restart.
   const getEffective = () => effectiveConfig(config)
   const provider = () => getEffective().modelProvider || 'qwen'
-  const apiKey = () =>
-    getEffective().apiKey || process.env[PROVIDER_KEY_ENV[provider()] || 'DASHSCOPE_API_KEY'] || ''
+  const apiKey = () => keyFor(getEffective())
   // Generic tool name by default; override with config.toolName if the host
   // already mounts an image_understand tool.
   const toolName = () => getEffective().toolName || 'image_understand'

@@ -13,12 +13,12 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
   const inject = ["slots"];
 
   const PROVIDERS = [
-    { key: "qwen",        name: "Qwen / 千问", free: true,  tag: "限免 50万 token",  desc: "Qwen3-VL-Flash",   env: "DASHSCOPE_API_KEY" },
-    { key: "volcengine",  name: "Doubao / 豆包", free: true, tag: "免费 20万起",      desc: "豆包视觉模型",     env: "VOLCENGINE_API_KEY" },
-    { key: "siliconflow", name: "DeepSeek-OCR", free: true,  tag: "免费 OCR",        desc: "硅基流动",         env: "SILICONFLOW_API_KEY" },
-    { key: "zhipu",       name: "GLM / 智谱",    free: false, tag: "按量",            desc: "GLM-4.6V",        env: "ZHIPU_API_KEY" },
-    { key: "hunyuan",     name: "Hunyuan / 混元", free: false, tag: "按量",           desc: "HY-Vision",       env: "HUNYUAN_API_KEY" },
-    { key: "custom",      name: "Custom / 自定义", free: false, tag: "OpenAI 兼容",   desc: "自建端点",        env: "CUSTOM_API_KEY" },
+    { key: "qwen",        name: "Qwen / 千问", free: true,  tag: "限免 50万 token", desc: "Qwen3-VL-Flash",   env: "DASHSCOPE_API_KEY",  url: "https://bailian.console.aliyun.com/", urlText: "阿里云百炼申请" },
+    { key: "volcengine",  name: "Doubao / 豆包", free: true, tag: "免费 20万起",     desc: "豆包视觉模型",     env: "VOLCENGINE_API_KEY", url: "https://console.volcengine.com/ark/", urlText: "火山方舟申请" },
+    { key: "siliconflow", name: "DeepSeek-OCR", free: true,  tag: "免费 OCR",       desc: "硅基流动",         env: "SILICONFLOW_API_KEY", url: "https://cloud.siliconflow.cn/", urlText: "硅基流动申请" },
+    { key: "zhipu",       name: "GLM / 智谱",    free: false, tag: "按量",           desc: "GLM-4.6V",        env: "ZHIPU_API_KEY",  url: "https://open.bigmodel.cn/", urlText: "智谱开放平台" },
+    { key: "hunyuan",     name: "Hunyuan / 混元", free: false, tag: "按量",          desc: "HY-Vision",       env: "HUNYUAN_API_KEY", url: "https://cloud.tencent.com/product/tokenhub", urlText: "腾讯云 TokenHub" },
+    { key: "custom",      name: "Custom / 自定义", free: false, tag: "OpenAI 兼容",  desc: "自建端点",        env: "CUSTOM_API_KEY", url: "", urlText: "" },
   ];
 
   const ADVANCED_LABELS = {
@@ -74,6 +74,34 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       style: keySet ? st.statusOk : st.statusWarn,
     }, statusText);
 
+    // Active provider linkage: its own key slot + signup link
+    const activeProv = PROVIDERS.find((p) => p.key === provider) || PROVIDERS[0];
+    const provKey = (state.value.keys && state.value.keys[provider]) || "";
+    const setProvKey = (v) => set("keys", { ...(state.value.keys || {}), [provider]: v });
+    const linkageBlock = react.createElement("div", { style: st.linkage },
+      react.createElement("div", { style: st.linkageRow },
+        react.createElement("label", { style: st.linkageLabel },
+          "API Key (" + activeProv.name + ")",
+          react.createElement("span", { style: st.required }, " *"),
+        ),
+        react.createElement("input", {
+          type: "password",
+          value: provKey,
+          placeholder: activeProv.env,
+          style: st.input,
+          onChange: (e) => setProvKey(e.target.value),
+        }),
+      ),
+      react.createElement("div", { style: st.linkageMeta },
+        react.createElement("span", { style: st.cardTag },
+          activeProv.free ? "免费额度：" + activeProv.tag : activeProv.tag),
+        activeProv.url
+          ? react.createElement("a", { href: activeProv.url, target: "_blank", rel: "noreferrer", style: st.link },
+              "↗ " + activeProv.urlText + "（注册后复制 " + activeProv.env + "）")
+          : null,
+      ),
+    );
+
     // Provider cards: free tiers get a highlighted badge
     const cards = PROVIDERS.map((p) => {
       const active = p.key === provider;
@@ -126,9 +154,8 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
 
     const advanced = react.createElement("details", { style: st.details, open: !keySet },
       react.createElement("summary", { style: st.summary },
-        "⚙ " + "Advanced settings / 高级设置" + (keySet ? "" : " (需要配置 API Key)"),
+        "⚙ " + "Advanced settings / 高级设置",
       ),
-      adv(ADVANCED_LABELS.apiKey, true, input("apiKey")),
       adv(ADVANCED_LABELS.modelName, false, input("modelName")),
       adv(ADVANCED_LABELS.toolName, false, input("toolName")),
       adv(ADVANCED_LABELS.maxTokens, false, input("maxTokens", "number")),
@@ -158,6 +185,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       status,
       warning,
       react.createElement("div", { style: st.grid }, ...cards),
+      linkageBlock,
       advanced,
       react.createElement("div", { style: st.row },
         react.createElement("button", { style: { ...st.button, ...(state.saving ? { opacity: 0.6 } : {}) }, disabled: state.saving, onClick: save },
@@ -222,6 +250,14 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     cardTag: { fontSize: 11, fontWeight: 500, color: "#3fb950", marginBottom: 2 },
     cardDesc: { fontSize: 11, color: "#9da7b3" },
     cardEnv: { fontSize: 10, fontFamily: "monospace", color: "#768390", marginTop: 4 },
+    linkage: {
+      margin: "0 0 12px", padding: "10px 12px", borderRadius: 8,
+      border: "1px solid #30363d", background: "#0d1117",
+    },
+    linkageRow: { display: "flex", alignItems: "center", gap: 10 },
+    linkageLabel: { flex: "0 0 auto", fontSize: 12, fontWeight: 500, color: "#c9d1d9", whiteSpace: "nowrap" },
+    linkageMeta: { display: "flex", alignItems: "center", gap: 12, marginTop: 8, flexWrap: "wrap" },
+    link: { fontSize: 12, color: "#58a6ff", textDecoration: "none" },
     details: { margin: "4px 0 10px", padding: "8px 10px", borderRadius: 8, border: "1px solid #30363d", background: "#0d1117" },
     summary: { cursor: "pointer", fontSize: 13, fontWeight: 500, color: "#e6edf3" },
     field: { margin: "8px 0" },
