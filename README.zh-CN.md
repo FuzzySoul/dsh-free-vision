@@ -31,6 +31,7 @@ One 1MB screenshot ≈ 2,600 tokens ≈ **$0.0006** on qwen; free quota covers ~
 - **零 MCP 配置** — 不用改 `cordis.patch.yml`、运行时不用 `npx`：视觉引擎（luma-mcp）作为本包依赖内置，进程内启动
 - **单个通用工具** — `image_understand`（可用 `config.toolName` 改名）注册到 `ctx.tools`，每次请求模型都能看到
 - **免费优先、多提供商** — 千问 / 豆包 / 硅基流动免费档开箱即用；智谱 / 混元 / custom 可切换
+- **每个 Provider 可覆盖 API Base URL** — 内置 Provider 可指向代理、API Gateway、本地服务或任意 OpenAI 兼容端点，无需改成 custom
 - **直连** — 子进程剥离代理环境变量，国内 API 直连（带代理会导致 502）
 - **任务模式** — `auto | general | ocr | ui | debug | describe`；大图自动多裁剪保真
 - **中英双语** — 工具描述与文档中英文都可用
@@ -60,6 +61,7 @@ saved to `~/.dsh/free-vision.json`, effective on the next tool call.
   name: 'dsh-free-vision'
   config:
     apiKey: 'sk-xxxx'        # 可选：缺省回退到提供商环境变量
+    baseURLs: {}             # 可选：按 Provider 覆盖 API Base URL，例如 { qwen: 'https://my-proxy.example.com/v1' }
     modelProvider: qwen      # qwen | volcengine | siliconflow | zhipu | hunyuan | custom
     modelName: qwen3-vl-flash # 可选模型覆盖
     toolName: image_understand # 工具公开名（冲突时可改名）
@@ -72,6 +74,27 @@ saved to `~/.dsh/free-vision.json`, effective on the next tool call.
 
 也可以只设置对应的环境变量（如 `DASHSCOPE_API_KEY`）。
 Or just set the matching environment variable (e.g. `DASHSCOPE_API_KEY`).
+
+### 覆盖 API 地址 / Base URL override
+
+当 `baseURLs` 缺失或值为空时，继续使用该 Provider 的官方默认地址。
+
+| Provider | 默认 Base URL |
+| --- | --- |
+| qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| volcengine | `https://ark.cn-beijing.volces.com/api/v3` |
+| siliconflow | `https://api.siliconflow.cn/v1` |
+| zhipu | `https://open.bigmodel.cn/api/paas/v4` |
+| hunyuan | `https://api.hunyuan.cloud.tencent.com/v1` |
+
+引擎会自动拼接 `/chat/completions` 并避免重复路径，因此以下写法都可用：
+
+- `https://my-proxy.example.com/v1`
+- `https://my-proxy.example.com/v1/chat/completions`
+
+也可以使用环境变量：`QWEN_BASE_URL`、`VOLCENGINE_BASE_URL`、
+`SILICONFLOW_BASE_URL`、`ZHIPU_BASE_URL`、`HUNYUAN_BASE_URL`
+（以及 custom 的 `CUSTOM_BASE_URL`）。
 
 ### 免费 Key 申请 / Free API keys
 

@@ -13,12 +13,12 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
   const inject = ["slots"];
 
   const PROVIDERS = [
-    { key: "qwen",        name: "Qwen / 千问", free: true,  tag: "限免 50万 token", desc: "Qwen3-VL-Flash",   env: "DASHSCOPE_API_KEY",  url: "https://bailian.console.aliyun.com/", urlText: "阿里云百炼申请" },
-    { key: "volcengine",  name: "Doubao / 豆包", free: true, tag: "免费 20万起",     desc: "豆包视觉模型",     env: "VOLCENGINE_API_KEY", url: "https://console.volcengine.com/ark/", urlText: "火山方舟申请" },
-    { key: "siliconflow", name: "DeepSeek-OCR", free: true,  tag: "免费 OCR",       desc: "硅基流动",         env: "SILICONFLOW_API_KEY", url: "https://cloud.siliconflow.cn/", urlText: "硅基流动申请" },
-    { key: "zhipu",       name: "GLM / 智谱",    free: false, tag: "按量",           desc: "GLM-4.6V",        env: "ZHIPU_API_KEY",  url: "https://open.bigmodel.cn/", urlText: "智谱开放平台" },
-    { key: "hunyuan",     name: "Hunyuan / 混元", free: false, tag: "按量",          desc: "HY-Vision",       env: "HUNYUAN_API_KEY", url: "https://cloud.tencent.com/product/tokenhub", urlText: "腾讯云 TokenHub" },
-    { key: "custom",      name: "Custom / 自定义", free: false, tag: "OpenAI 兼容",  desc: "自建端点",        env: "CUSTOM_API_KEY", url: "", urlText: "" },
+    { key: "qwen",        name: "Qwen / 千问", free: true,  tag: "限免 50万 token", desc: "Qwen3-VL-Flash",   env: "DASHSCOPE_API_KEY",  url: "https://bailian.console.aliyun.com/", urlText: "阿里云百炼申请", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+    { key: "volcengine",  name: "Doubao / 豆包", free: true, tag: "免费 20万起",     desc: "豆包视觉模型",     env: "VOLCENGINE_API_KEY", url: "https://console.volcengine.com/ark/", urlText: "火山方舟申请", baseUrl: "https://ark.cn-beijing.volces.com/api/v3" },
+    { key: "siliconflow", name: "DeepSeek-OCR", free: true,  tag: "免费 OCR",       desc: "硅基流动",         env: "SILICONFLOW_API_KEY", url: "https://cloud.siliconflow.cn/", urlText: "硅基流动申请", baseUrl: "https://api.siliconflow.cn/v1" },
+    { key: "zhipu",       name: "GLM / 智谱",    free: false, tag: "按量",           desc: "GLM-4.6V",        env: "ZHIPU_API_KEY",  url: "https://open.bigmodel.cn/", urlText: "智谱开放平台", baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
+    { key: "hunyuan",     name: "Hunyuan / 混元", free: false, tag: "按量",          desc: "HY-Vision",       env: "HUNYUAN_API_KEY", url: "https://cloud.tencent.com/product/tokenhub", urlText: "腾讯云 TokenHub", baseUrl: "https://api.hunyuan.cloud.tencent.com/v1" },
+    { key: "custom",      name: "Custom / 自定义", free: false, tag: "OpenAI 兼容",  desc: "自建端点",        env: "CUSTOM_API_KEY", url: "", urlText: "", baseUrl: "" },
   ];
 
   const ADVANCED_LABELS = {
@@ -74,10 +74,13 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       style: keySet ? st.statusOk : st.statusWarn,
     }, statusText);
 
-    // Active provider linkage: its own key slot + signup link
+    // Active provider linkage: its own key slot + base URL override + signup link
     const activeProv = PROVIDERS.find((p) => p.key === provider) || PROVIDERS[0];
     const provKey = (state.value.keys && state.value.keys[provider]) || "";
     const setProvKey = (v) => set("keys", { ...(state.value.keys || {}), [provider]: v });
+    const defaultBaseUrl = activeProv.baseUrl || "";
+    const provBaseUrl = (state.value.baseURLs && state.value.baseURLs[provider]) || defaultBaseUrl;
+    const setProvBaseUrl = (v) => set("baseURLs", { ...(state.value.baseURLs || {}), [provider]: v });
     const linkageBlock = react.createElement("div", { style: st.linkage },
       react.createElement("div", { style: st.linkageRow },
         react.createElement("label", { style: st.linkageLabel },
@@ -91,6 +94,22 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
           style: st.input,
           onChange: (e) => setProvKey(e.target.value),
         }),
+      ),
+      react.createElement("div", { style: st.linkageRow },
+        react.createElement("label", { style: st.linkageLabel },
+          "Base URL / API 地址",
+          activeProv.baseUrl ? null : react.createElement("span", { style: st.hint, title: "Custom provider needs a Base URL to work" }, " *"),
+        ),
+        react.createElement("input", {
+          type: "text",
+          value: provBaseUrl,
+          placeholder: activeProv.baseUrl || "https://your-proxy.example.com/v1",
+          style: st.input,
+          onChange: (e) => setProvBaseUrl(e.target.value),
+        }),
+      ),
+      react.createElement("div", { style: st.linkageHint },
+        "留空使用官方默认地址；可填写代理 / API Gateway / 本地 OpenAI-compatible 服务。留空自动回退默认值。",
       ),
       react.createElement("div", { style: st.linkageMeta },
         react.createElement("span", { style: st.cardTag },
@@ -257,6 +276,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     linkageRow: { display: "flex", alignItems: "center", gap: 10 },
     linkageLabel: { flex: "0 0 auto", fontSize: 12, fontWeight: 500, color: "#c9d1d9", whiteSpace: "nowrap" },
     linkageMeta: { display: "flex", alignItems: "center", gap: 12, marginTop: 8, flexWrap: "wrap" },
+    linkageHint: { fontSize: 11, color: "#768390", marginTop: 6 },
     link: { fontSize: 12, color: "#58a6ff", textDecoration: "none" },
     details: { margin: "4px 0 10px", padding: "8px 10px", borderRadius: 8, border: "1px solid #30363d", background: "#0d1117" },
     summary: { cursor: "pointer", fontSize: 13, fontWeight: 500, color: "#e6edf3" },

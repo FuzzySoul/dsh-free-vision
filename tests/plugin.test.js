@@ -31,6 +31,7 @@ describe('plugin surface', () => {
     expect(mod.inject).toContain('tools')
     expect(typeof mod.apply).toBe('function')
     expect(typeof mod.Config?.toJSON).toBe('function')
+    expect(JSON.stringify(mod.Config.toJSON())).toContain('baseURLs')
   })
 
   it('registers the image_understand tool', async () => {

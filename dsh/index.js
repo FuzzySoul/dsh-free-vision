@@ -35,6 +35,10 @@ export const Config = z.object({
     .string()
     .description('API Key（缺省回退到对应提供商的环境变量，如 DASHSCOPE_API_KEY）/ API key; falls back to the provider env var')
     .default(''),
+  baseURLs: z
+    .dict(String)
+    .description('每个 Provider 可选 API Base URL 覆盖，留空使用官方默认地址 / per-provider optional API base URL override (empty = official default)')
+    .default({}),
   modelProvider: z
     .union([
       z.const('qwen'),
@@ -152,6 +156,89 @@ const PROVIDER_KEY_ENV = {
   custom: 'CUSTOM_API_KEY',
 }
 
+/** Provider -> default API base URL (without /chat/completions). */
+const PROVIDER_BASE_URLS = {
+  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
+  siliconflow: 'https://api.siliconflow.cn/v1',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  hunyuan: 'https://api.hunyuan.cloud.tencent.com/v1',
+  custom: '',
+}
+
+/** Provider -> base URL env var consumed by the patched luma-mcp engine. */
+const PROVIDER_BASE_URL_ENV = {
+  qwen: 'QWEN_BASE_URL',
+  volcengine: 'VOLCENGINE_BASE_URL',
+  siliconflow: 'SILICONFLOW_BASE_URL',
+  zhipu: 'ZHIPU_BASE_URL',
+  hunyuan: 'HUNYUAN_BASE_URL',
+  custom: 'CUSTOM_BASE_URL',
+}
+
+function normalizeBaseUrl(raw) {
+  if (typeof raw !== 'string') return ''
+  const trimmed = raw.trim().replace(/\/+$/, '')
+  return trimmed
+}
+
+/**
+ * Resolve the live API base URL for a provider:
+ * saved baseURLs[provider] > provider base URL env var > official default.
+ */
+function baseURLFor(cfg, provider) {
+  const prov = provider || cfg.modelProvider || 'qwen'
+  const candidates = []
+  const saved = cfg.baseURLs && cfg.baseURLs[prov]
+  if (typeof saved === 'string' && saved.trim()) candidates.push(saved)
+  const envName = PROVIDER_BASE_URL_ENV[prov]
+  if (envName && process.env[envName] && process.env[envName].trim()) {
+    candidates.push(process.env[envName])
+  }
+  for (const raw of candidates) {
+    const value = normalizeBaseUrl(raw)
+    if (!value) continue
+    try {
+      const url = new URL(value)
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        return url.toString().replace(/\/+$/, '')
+      }
+    } catch { /* fall through to default */ }
+  }
+  return PROVIDER_BASE_URLS[prov] || ''
+}
+
+/**
+ * Validate/normalize a settings object before persisting it. Base URL values
+ * must be empty or an absolute http(s) URL; trailing slashes are stripped.
+ */
+function normalizeSettings(input) {
+  const next = { ...(input || {}) }
+  if (next.baseURLs != null) {
+    if (typeof next.baseURLs !== 'object' || Array.isArray(next.baseURLs)) {
+      throw new Error('baseURLs must be an object mapping provider name to URL string')
+    }
+    const baseURLs = {}
+    for (const [provider, raw] of Object.entries(next.baseURLs)) {
+      if (raw == null || raw === '') continue
+      const value = normalizeBaseUrl(raw)
+      if (!value) continue
+      let parsed
+      try {
+        parsed = new URL(value)
+      } catch {
+        throw new Error(`Invalid Base URL for "${provider}": ${value}`)
+      }
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`Base URL for "${provider}" must start with http(s)://`)
+      }
+      baseURLs[provider] = parsed.toString().replace(/\/+$/, '')
+    }
+    next.baseURLs = baseURLs
+  }
+  return next
+}
+
 /** Build the child environment: host env minus proxy vars plus luma config. */
 function buildChildEnv(lumaEnv) {
   const env = { ...process.env }
@@ -191,9 +278,12 @@ export function apply(ctx, config = {}) {
     const cfg = getEffective()
     const prov = provider()
     const key = apiKey()
+    const baseURL = baseURLFor(cfg, prov)
+    const baseEnvName = PROVIDER_BASE_URL_ENV[prov] || 'CUSTOM_BASE_URL'
     return {
       MODEL_PROVIDER: prov,
       ...(key ? { [PROVIDER_KEY_ENV[prov] || 'DASHSCOPE_API_KEY']: key } : {}),
+      ...(baseURL ? { [baseEnvName]: baseURL } : {}),
       ...(cfg.modelName ? { MODEL_NAME: cfg.modelName } : {}),
       ...(cfg.maxTokens ? { MAX_TOKENS: String(cfg.maxTokens) } : {}),
       ...(cfg.temperature != null ? { TEMPERATURE: String(cfg.temperature) } : {}),
@@ -426,7 +516,7 @@ export function apply(ctx, config = {}) {
             for await (const chunk of req) body += chunk
             try {
               const parsed = JSON.parse(body || '{}')
-              const next = parsed.config && typeof parsed.config === 'object' ? parsed.config : {}
+              const next = normalizeSettings(parsed.config && typeof parsed.config === 'object' ? parsed.config : {})
               writeSettingsFile(next)
               // Drop the live connection and re-sync tools: if the plugin
               // started without a key (stub tool), saving one upgrades the
@@ -452,4 +542,14 @@ export function apply(ctx, config = {}) {
 }
 
 // Exported for unit tests (harmless to cordis).
-export { CONFIG_PATH, effectiveConfig, migrateKeys, keyFor, keySourceOf }
+export {
+  CONFIG_PATH,
+  effectiveConfig,
+  migrateKeys,
+  keyFor,
+  keySourceOf,
+  baseURLFor,
+  normalizeSettings,
+  PROVIDER_BASE_URLS,
+  PROVIDER_BASE_URL_ENV,
+}

@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-free-vision)](https://www.npmjs.com/package/dsh-free-vision)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-free-vision)](https://www.npmjs.com/package/dsh-free-vision)
+[![npm dev](https://img.shields.io/npm/v/dsh-free-vision/dev?label=dev)](https://www.npmjs.com/package/dsh-free-vision)
 [![license](https://img.shields.io/npm/l/dsh-free-vision)](LICENSE)
 [![stars](https://img.shields.io/github/stars/FuzzySoul/dsh-free-vision)](https://github.com/FuzzySoul/dsh-free-vision)
 [![GitHub issues](https://img.shields.io/github/issues/FuzzySoul/dsh-free-vision)](https://github.com/FuzzySoul/dsh-free-vision/issues)
@@ -32,6 +33,7 @@ One 1MB screenshot ≈ 2,600 tokens ≈ **$0.0006** on qwen; free quota covers ~
 - **Zero MCP config** — no `cordis.patch.yml` edits, no `npx` at runtime: the vision engine (luma-mcp) ships as this package's own dependency and is spawned in-process
 - **Single generic tool** — `image_understand` (rename via `config.toolName`) is registered on `ctx.tools` and reaches the model on every request
 - **Free-first multi-provider** — qwen / volcengine / siliconflow free tiers out of the box; zhipu / hunyuan / custom for anything else
+- **Per-provider API Base URL override** — point any built-in provider at a proxy, API Gateway, local service or OpenAI-compatible endpoint without turning it into a `custom` provider
 - **Direct connection** — proxy env vars are stripped from the child process so mainland-China API endpoints are reached directly (a stray proxy causes 502)
 - **Task modes** — `auto | general | ocr | ui | debug | describe`; big images are auto multi-cropped for detail fidelity
 - **Bilingual** — descriptions and docs work for both English and Chinese prompts
@@ -62,6 +64,7 @@ tool call (no restart needed).
   name: 'dsh-free-vision'
   config:
     apiKey: 'sk-xxxx'        # optional: falls back to the provider env var
+    baseURLs: {}             # optional per-provider API base URL override, e.g. { qwen: 'https://my-proxy.example.com/v1' }
     modelProvider: qwen      # qwen | volcengine | siliconflow | zhipu | hunyuan | custom
     modelName: qwen3-vl-flash # optional model override
     toolName: image_understand # tool public name (rename if it collides)
@@ -74,6 +77,29 @@ tool call (no restart needed).
 
 Or just set the matching environment variable (e.g. `DASHSCOPE_API_KEY`).
 也可以只设置对应的环境变量（如 `DASHSCOPE_API_KEY`）。
+
+### Base URL override / API 地址覆盖
+
+Each built-in provider keeps its official default endpoint when `baseURLs` is
+missing or the value is empty.
+
+| Provider | Default Base URL |
+| --- | --- |
+| qwen | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| volcengine | `https://ark.cn-beijing.volces.com/api/v3` |
+| siliconflow | `https://api.siliconflow.cn/v1` |
+| zhipu | `https://open.bigmodel.cn/api/paas/v4` |
+| hunyuan | `https://api.hunyuan.cloud.tencent.com/v1` |
+
+The engine appends `/chat/completions` automatically and avoids double paths,
+so both of these work:
+
+- `https://my-proxy.example.com/v1`
+- `https://my-proxy.example.com/v1/chat/completions`
+
+You can also set the matching environment variable instead of the settings UI:
+`QWEN_BASE_URL`, `VOLCENGINE_BASE_URL`, `SILICONFLOW_BASE_URL`, `ZHIPU_BASE_URL`,
+`HUNYUAN_BASE_URL` (and `CUSTOM_BASE_URL` for the existing custom provider).
 
 ### Free API keys / 免费 Key 申请
 

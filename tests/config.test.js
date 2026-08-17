@@ -86,3 +86,56 @@ describe('keySourceOf', () => {
     expect(mod.keySourceOf({})).toBe('none')
   })
 })
+
+describe('baseURLFor', () => {
+  afterEach(() => {
+    for (const name of Object.values(mod.PROVIDER_BASE_URL_ENV || {})) {
+      delete process.env[name]
+    }
+  })
+
+  it('returns the official default when no override is set', () => {
+    expect(mod.baseURLFor({ modelProvider: 'qwen' }, 'qwen')).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1')
+    expect(mod.baseURLFor({}, 'siliconflow')).toBe('https://api.siliconflow.cn/v1')
+  })
+
+  it('prefers baseURLs[provider] over the official default', () => {
+    const cfg = { baseURLs: { qwen: 'https://proxy.example.com/v1/' } }
+    expect(mod.baseURLFor(cfg, 'qwen')).toBe('https://proxy.example.com/v1')
+  })
+
+  it('falls back to the provider base URL env var', () => {
+    process.env.QWEN_BASE_URL = 'https://env-proxy.example.com/v1'
+    expect(mod.baseURLFor({}, 'qwen')).toBe('https://env-proxy.example.com/v1')
+  })
+
+  it('keeps legacy configs working when baseURLs is missing', () => {
+    expect(mod.baseURLFor({ modelProvider: 'qwen' }, 'qwen')).toBe(mod.PROVIDER_BASE_URLS.qwen)
+  })
+
+  it('falls back to the default when a saved base URL is invalid', () => {
+    expect(mod.baseURLFor({ baseURLs: { qwen: 'not a url' } }, 'qwen')).toBe(mod.PROVIDER_BASE_URLS.qwen)
+  })
+})
+
+describe('normalizeSettings', () => {
+  it('strips trailing slashes from baseURLs', () => {
+    const out = mod.normalizeSettings({ baseURLs: { qwen: 'https://proxy.example.com/v1////' } })
+    expect(out.baseURLs.qwen).toBe('https://proxy.example.com/v1')
+  })
+
+  it('drops empty baseURL values (use default)', () => {
+    const out = mod.normalizeSettings({ baseURLs: { qwen: '', volcengine: '   ' } })
+    expect(out.baseURLs).toEqual({})
+  })
+
+  it('rejects non-http(s) base URLs', () => {
+    expect(() => mod.normalizeSettings({ baseURLs: { qwen: 'ftp://example.com/v1' } }))
+      .toThrow(/http/)
+  })
+
+  it('rejects malformed URLs', () => {
+    expect(() => mod.normalizeSettings({ baseURLs: { qwen: 'not a url' } }))
+      .toThrow(/Invalid Base URL/)
+  })
+})

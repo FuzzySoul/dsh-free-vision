@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Per-provider API Base URL override (`baseURLs` map): point qwen / volcengine /
+  siliconflow / zhipu / hunyuan (and custom) at a proxy, API Gateway, local
+  service or any OpenAI-compatible endpoint. UI shows the default Base URL next
+  to the API Key and saves the override to `~/.dsh/free-vision.json`.
+- The pinned luma-mcp engine is patched on `postinstall` so provider-specific
+  `*_BASE_URL` env vars are consumed by the real API request layer and URL
+  duplication (`/v1/v1`, `/chat/completions/chat/completions`) is avoided.
+
 ## [0.6.0] - 2026-08-15
 
 ### Added

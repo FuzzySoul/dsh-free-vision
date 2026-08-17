@@ -7,6 +7,8 @@
 export interface FreeVisionConfig {
   /** Per-provider API keys. Legacy flat `apiKey` is migrated here. */
   keys?: Record<string, string>
+  /** Per-provider optional API base URL overrides. Empty/missing = official default. */
+  baseURLs?: Record<string, string>
   /** Active provider: qwen | volcengine | siliconflow | zhipu | hunyuan | custom */
   modelProvider?: string
   /** Model override (defaults per provider) */

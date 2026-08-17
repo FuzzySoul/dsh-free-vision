@@ -49,11 +49,20 @@
    settings UI automatically selects that provider's key. Legacy flat
    `apiKey` is migrated on first read.
 
-5. **Graceful degradation** — without an API key the plugin still loads and
+5. **Per-provider base URL override** — `baseURLs[provider]` map mirrors the
+   key map. Empty/missing values use the provider's official default; saved
+   values are passed to the engine as `QWEN_BASE_URL`,
+   `SILICONFLOW_BASE_URL`, `VOLCENGINE_BASE_URL`, `ZHIPU_BASE_URL` or
+   `HUNYUAN_BASE_URL` (plus `CUSTOM_BASE_URL` for the existing custom
+   provider). The plugin's `postinstall` applies a small idempotent patch to
+   the pinned luma-mcp dependency so those env vars are actually consumed and
+   URL duplication is avoided.
+
+6. **Graceful degradation** — without an API key the plugin still loads and
    registers a stub tool whose error message points to Settings, so the host
    never shows an opaque plugin failure.
 
-6. **Direct connection, no MCP server config** — unlike the manual
+7. **Direct connection, no MCP server config** — unlike the manual
    `dsh-mcp-client` route, this plugin owns the whole pipeline, so users
    never touch `cordis.patch.yml`.
 
@@ -64,6 +73,7 @@
 ```json
 {
   "keys": { "qwen": "sk-...", "volcengine": "" },
+  "baseURLs": { "qwen": "https://my-proxy.example.com/v1" },
   "modelProvider": "qwen",
   "modelName": "",
   "toolName": "image_understand",
@@ -76,7 +86,9 @@
 ```
 
 Merge order: cordis patch config < settings file. The live key resolution is
-`keys[provider] > legacy apiKey > provider env var`.
+`keys[provider] > legacy apiKey > provider env var`. The live base URL
+resolution is `baseURLs[provider] > provider base URL env var > official
+default`.
 
 ## HTTP API / 接口
 
