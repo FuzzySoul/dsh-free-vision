@@ -1,4 +1,5 @@
 # dsh-free-vision
+🌐 [English](README.en.md) | [中文](README.md)
 
 [![npm 版本](https://img.shields.io/npm/v/dsh-free-vision)](https://www.npmjs.com/package/dsh-free-vision)
 [![npm 下载](https://img.shields.io/npm/dm/dsh-free-vision)](https://www.npmjs.com/package/dsh-free-vision)
