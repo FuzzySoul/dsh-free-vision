@@ -1,14 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { dirname } from 'node:path'
 
-const CONFIG_PATH = homedir() + '/.dsh/free-vision.json'
+const CONFIG_PATH = process.env.DSH_FREE_VISION_CONFIG_PATH || homedir() + '/.dsh/free-vision.json'
 
 // Import the plugin module (fresh per test file run)
 const mod = await import('../dsh/index.js')
 
 function writeConfig(obj) {
-  mkdirSync(homedir() + '/.dsh', { recursive: true })
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true })
   writeFileSync(CONFIG_PATH, JSON.stringify(obj), 'utf-8')
 }
 

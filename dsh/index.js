@@ -86,7 +86,7 @@ const PROXY_VARS = [
 ]
 
 /** Persistent settings file (written by the web settings UI). */
-const CONFIG_PATH = homedir() + '/.dsh/free-vision.json'
+const CONFIG_PATH = process.env.DSH_FREE_VISION_CONFIG_PATH || homedir() + '/.dsh/free-vision.json'
 
 /** Read the persistent settings file; {} on any failure. */
 function readSettingsFile() {

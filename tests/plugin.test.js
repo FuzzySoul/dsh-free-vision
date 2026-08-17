@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { dirname } from 'node:path'
 
-const CONFIG_PATH = homedir() + '/.dsh/free-vision.json'
+const CONFIG_PATH = process.env.DSH_FREE_VISION_CONFIG_PATH || homedir() + '/.dsh/free-vision.json'
 
 async function loadPlugin() {
   // fresh module each time (config read is at apply time)
