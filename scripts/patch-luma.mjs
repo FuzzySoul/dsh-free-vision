@@ -6,12 +6,14 @@
 // The plugin writes these variables into the child process environment.
 // The patch is idempotent and pinned to luma-mcp 1.7.1 (package.json uses an
 // exact version so the expected strings below stay stable).
+import { createRequire } from 'node:module'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const lumaDir = resolve(root, 'node_modules/luma-mcp/build')
+const require = createRequire(import.meta.url)
+// Resolve through Node's module lookup instead of assuming a flat
+// node_modules layout. This is required for pnpm (virtual store) installs.
+const lumaDir = dirname(require.resolve('luma-mcp'))
 
 function patchFile(file, replacements) {
   const path = resolve(lumaDir, file)
