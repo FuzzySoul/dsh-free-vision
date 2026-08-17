@@ -10,6 +10,10 @@ on:
         description: 'Publish to npm (requires NPM_TOKEN secret)'
         type: boolean
         default: false
+      tag:
+        description: 'npm dist-tag for this publish (default: dev, so 0.7+/experimental builds never replace latest)'
+        type: string
+        default: dev
 
 jobs:
   test:
@@ -44,6 +48,6 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Publish
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --tag "${{ github.event.inputs.tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

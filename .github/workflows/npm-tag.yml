@@ -1,0 +1,30 @@
+name: npm-tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag (e.g. 0.7.2)'
+        type: string
+        required: true
+      tag:
+        description: 'npm dist-tag to set (default: dev)'
+        type: string
+        default: dev
+
+jobs:
+  tag:
+    name: Tag npm version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+      - name: Set npm dist-tag
+        run: npm dist-tag add "dsh-free-vision@${{ github.event.inputs.version }}" "${{ github.event.inputs.tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
