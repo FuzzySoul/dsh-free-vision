@@ -1,3 +1,4 @@
+# ── dependencies / build artifacts / local secrets ──────
 node_modules/
 *.log
 .DS_Store
@@ -7,5 +8,7 @@ node_modules/
 # local settings (contains API keys - never commit)
 free-vision.json
 
-# test artifacts
+# test/build artifacts
 coverage/
+dist/
+out/

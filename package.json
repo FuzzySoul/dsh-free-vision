@@ -12,16 +12,10 @@
   },
   "files": [
     "dsh",
-    "cordis.patch.yml",
-    "README.md",
-    "README.en.md",
-    "LICENSE",
-    "README.zh-CN.md",
     "client",
-    "docs",
-    "scripts",
-    "CHANGELOG.md",
-    "SECURITY.md"
+    "cordis.patch.yml",
+    "scripts/patch-luma.mjs",
+    "README.md"
   ],
   "keywords": [
     "dsh",
