@@ -78,6 +78,10 @@ export const Config = z.object({
     .dict(String)
     .description('传递给视觉引擎的额外环境变量 / extra env vars for the engine')
     .default({}),
+  allowedDirs: z
+    .string()
+    .description('允许读取图片的额外目录（;或,分隔，默认仅引擎工作目录与用户主目录）/ extra allowed image root dirs (semicolon/comma separated)')
+    .default(''),
 })
 
 const PROXY_VARS = [
@@ -284,10 +288,11 @@ export function apply(ctx, config = {}) {
       MODEL_PROVIDER: prov,
       ...(key ? { [PROVIDER_KEY_ENV[prov] || 'DASHSCOPE_API_KEY']: key } : {}),
       ...(baseURL ? { [baseEnvName]: baseURL } : {}),
-      ...(cfg.modelName ? { MODEL_NAME: cfg.modelName } : {}),
+      ...(cfg.modelName ? { MODEL_NAME: cfg.modelName, ...(prov === 'custom' ? { CUSTOM_MODEL_NAME: cfg.modelName } : {}) } : {}),
       ...(cfg.maxTokens ? { MAX_TOKENS: String(cfg.maxTokens) } : {}),
       ...(cfg.temperature != null ? { TEMPERATURE: String(cfg.temperature) } : {}),
       ...(cfg.multiCrop === false ? { MULTI_CROP: 'false' } : {}),
+      ...(cfg.allowedDirs ? { LUMA_ALLOWED_DIRS: cfg.allowedDirs } : {}),
       ...(cfg.lumaEnv || {}),
     }
   }
