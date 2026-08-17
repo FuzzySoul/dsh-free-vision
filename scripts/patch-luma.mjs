@@ -7,13 +7,34 @@
 // The patch is idempotent and pinned to luma-mcp 1.7.1 (package.json uses an
 // exact version so the expected strings below stay stable).
 import { createRequire } from 'node:module'
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 
 const require = createRequire(import.meta.url)
-// Resolve through Node's module lookup instead of assuming a flat
-// node_modules layout. This is required for pnpm (virtual store) installs.
-const lumaDir = dirname(require.resolve('luma-mcp'))
+
+// Resolve luma-mcp through Node's module lookup so the patch works under
+// npm (flat node_modules) and pnpm (virtual store / hoisted) installs. The
+// script lives in <package>/scripts; module resolution starts from the
+// package root, which is exactly this package's own dependency scope.
+let lumaEntry
+try {
+  lumaEntry = require.resolve('luma-mcp')
+} catch {
+  // pnpm with nodeLinker=isolated keeps dependencies out of the package's
+  // own require scope; fall back to the hoisted profile node_modules and
+  // finally to the classic flat layout.
+  const candidates = [
+    resolve(dirname(require.resolve('./package.json')), 'node_modules/luma-mcp'),
+    resolve(dirname(require.resolve('./package.json')), '../node_modules/luma-mcp'),
+  ]
+  lumaEntry = candidates.find((p) => existsSync(resolve(p, 'build/index.js')))
+  if (!lumaEntry) {
+    throw new Error(
+      '[patch-luma] could not locate luma-mcp. Expected it under the package node_modules (npm/pnpm hoisted) or a sibling node_modules (pnpm isolated). Nothing was patched; Base URL overrides will be ignored.',
+    )
+  }
+}
+const lumaDir = dirname(lumaEntry)
 
 function patchFile(file, replacements) {
   const path = resolve(lumaDir, file)
