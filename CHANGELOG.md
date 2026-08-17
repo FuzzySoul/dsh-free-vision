@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-08-17
+
+### Fixed
+
+- `postinstall` patch script could crash when installing through pnpm
+  (dshmarket updates). The luma-mcp path is now resolved via Node's module
+  lookup with fallbacks, so the patch works under npm (flat), pnpm isolated
+  (virtual store), and pnpm hoisted layouts.
+
 ## [1.0.0] - 2026-08-17
 
 > Closes [#1](https://github.com/FuzzySoul/dsh-free-vision/issues/1): FEAT API override — allow overriding each provider's API Base URL.
