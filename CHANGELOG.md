@@ -5,9 +5,9 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-08-17
 
-## [0.7.0] - 2026-08-17
+> Closes [#1](https://github.com/FuzzySoul/dsh-free-vision/issues/1): FEAT API override — allow overriding each provider's API Base URL.
 
 ### Added
 
