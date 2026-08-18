@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Pasted/dropped images now feed straight into the vision tool without the
+  external `describe-image` plugin: a new backend `POST /dsh-free-vision/attach`
+  saves the image into the host attachment store and returns a durable Markdown
+  `![图片](/dsh-free-vision/raw/<id>?ref=…)` reference, and a new
+  `GET /dsh-free-vision/raw/<id>` route streams those bytes back so the
+  reference renders in the conversation.
+- The client auto-rewrites outbound messages that carry an image into that text
+  reference (wrapping `conversation.sendSession`), so pasting/sending an image
+  bypasses the "current model does not support images" admissibility gate. The
+  hook is dedup-guarded and wrapped in try/catch with a fallback so it can never
+  break the settings page or an existing session.
+
 ## [1.0.3] - 2026-08-18
 
 ### Added
