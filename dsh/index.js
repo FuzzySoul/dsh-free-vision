@@ -147,6 +147,33 @@ function writeSettingsFile(next) {
   writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf-8')
 }
 
+/**
+ * Split the user-configurable allowedDirs string into an array of paths.
+ * Accepted separators: ';' or ','. Empty entries are dropped.
+ */
+function parseDirs(dirs) {
+  if (!dirs || typeof dirs !== 'string') return []
+  return dirs
+    .split(/[;,]/)
+    .map((p) => (p || '').trim())
+    .filter(Boolean)
+    .filter((p, i, arr) => arr.indexOf(p) === i)
+}
+
+/**
+ * The effective image read whitelist forwarded to the engine's
+ * LUMA_ALLOWED_DIRS. The engine always allows process.cwd() and the user
+ * home; extra roots come from the `allowedDirs` config. Returned as
+ * `{ defaults: string[], extra: string[], all: string[] }` so the settings
+ * UI can show exactly what is in force and what the user added.
+ */
+function resolveAllowedDirs(cfg) {
+  const defaults = [process.cwd(), homedir()].filter(Boolean)
+  const extra = parseDirs(cfg && cfg.allowedDirs)
+  const all = defaults.concat(extra).filter((p, i, arr) => arr.indexOf(p) === i)
+  return { defaults, extra, all }
+}
+
 export const name = 'free-vision'
 export const inject = ['tools']
 
@@ -518,6 +545,7 @@ export function apply(ctx, config = {}) {
               value: getEffective(),
               hasKey: !!apiKey(),
               keySource: keySourceOf(config),
+              allowedDirs: resolveAllowedDirs(getEffective()),
             })
             return
           }
@@ -560,6 +588,7 @@ export {
   keySourceOf,
   baseURLFor,
   normalizeSettings,
+  resolveAllowedDirs,
   PROVIDER_BASE_URLS,
   PROVIDER_BASE_URL_ENV,
 }

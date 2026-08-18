@@ -29,18 +29,19 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     temperature: "Temperature / 温度",
     multiCrop: "Multi-crop / 大图多裁剪",
     toolCallTimeoutMs: "Timeout (ms) / 超时",
+    allowedDirs: "Allowed Dirs / 允许读取的图片目录",
     lumaEnv: "Extra Env / 额外环境变量 (JSON)",
   };
 
   function Section() {
     const [state, setState] = react.useState({
       loading: true, schema: null, value: {}, hasKey: false, keySource: "none",
-      saving: false, saved: false, error: "",
+      allowedDirs: null, saving: false, saved: false, error: "",
     });
     react.useEffect(() => {
       fetch("/dsh-free-vision/config", { cache: "no-store" })
         .then((r) => r.json())
-        .then((body) => setState((s) => ({ ...s, loading: false, schema: body.schema, value: body.value || {}, hasKey: !!body.hasKey, keySource: body.keySource || "none" })))
+        .then((body) => setState((s) => ({ ...s, loading: false, schema: body.schema, value: body.value || {}, hasKey: !!body.hasKey, keySource: body.keySource || "none", allowedDirs: body.allowedDirs || null })))
         .catch((e) => setState((s) => ({ ...s, loading: false, error: String((e && e.message) || e) })));
     }, []);
 
@@ -195,6 +196,20 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
           try { set("lumaEnv", JSON.parse(raw)); } catch { /* keep last valid */ }
         },
       })),
+      adv(ADVANCED_LABELS.allowedDirs, false, input("allowedDirs")),
+      (function () {
+        const ad = state.allowedDirs;
+        if (!ad || !Array.isArray(ad.all)) return null;
+        return react.createElement("div", { style: st.cardDesc },
+          react.createElement("div", { style: st.label }, "当前生效白名单 / Effective whitelist"),
+          ad.defaults.map((p) => react.createElement("div", { style: st.mono }, "• " + p + "  (default 默认)")),
+          ad.extra.map((p) => react.createElement("div", { style: st.mono }, "• " + p + "  (added 你添加的)")),
+          react.createElement("p", { style: st.hint },
+            "引擎默认只能读工作区目录和用户主目录；要读取其他位置的图片文件，请在上面 " + ADVANCED_LABELS.allowedDirs + " 里用 ; 或 , 分隔添加。"),
+        );
+      })(),
+      react.createElement("div", { style: st.warn },
+        "⚠ " + "图片读取被拒（Access denied: image path is outside the allowed directory）时，请回到「设置 → Free Vision → 高级设置」在“允许读取的图片目录”里加上对应路径。若一直无法分析图片，先确认已配置 API Key。"),
     );
 
     return react.createElement("div", { style: st.card },
@@ -301,6 +316,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     },
     ok: { fontSize: 12, color: "#3fb950" },
     error: { fontSize: 12, color: "#f85149" },
+    mono: { fontSize: 11, fontFamily: "monospace", color: "#9da7b3", margin: "1px 0" },
   };
 
   exports.name = name;

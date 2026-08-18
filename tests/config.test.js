@@ -140,3 +140,25 @@ describe('normalizeSettings', () => {
       .toThrow(/Invalid Base URL/)
   })
 })
+
+describe('resolveAllowedDirs', () => {
+  it('always includes cwd and homedir as defaults', () => {
+    const r = mod.resolveAllowedDirs({})
+    expect(r.defaults).toContain(process.cwd())
+    expect(r.defaults).toContain(homedir())
+    expect(r.extra).toEqual([])
+    expect(r.all).toEqual(r.defaults)
+  })
+
+  it('splits allowedDirs on ; and , and strips empties', () => {
+    const r = mod.resolveAllowedDirs({ allowedDirs: ' /a ; /b ,  ' })
+    expect(r.extra).toEqual(['/a', '/b'])
+    expect(r.all).toEqual([...r.defaults, '/a', '/b'])
+  })
+
+  it('dedupes repeated dirs and allows the empty string', () => {
+    const r = mod.resolveAllowedDirs({ allowedDirs: '/a, /a;' })
+    expect(r.extra).toEqual(['/a'])
+    expect(mod.resolveAllowedDirs({ allowedDirs: '' }).extra).toEqual([])
+  })
+})
