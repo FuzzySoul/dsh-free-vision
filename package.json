@@ -1,6 +1,6 @@
 {
   "name": "dsh-free-vision",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Free vision plugin for DeepSeek Harness (dsh): image understanding for text-only models with free-tier providers (Qwen3-VL-Flash / DeepSeek-OCR / Doubao). 免费视觉插件：纯文本模型看图能力，优先免费模型（通义千问 / 硅基流动 / 豆包）。",
   "type": "module",
   "main": "./dsh/index.js",

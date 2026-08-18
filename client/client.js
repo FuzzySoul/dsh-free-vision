@@ -31,6 +31,9 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     toolCallTimeoutMs: "Timeout (ms) / 超时",
     allowedDirs: "Allowed Dirs / 允许读取的图片目录",
     preservePastedImages: "Preserve pasted thumbnails / 保留粘贴图片显示（推荐开启）",
+    describeAtDispatch: "One-step describe / 一步识别：粘贴图直接给出描述（推荐开启）",
+    describePrompt: "Describe prompt / 图片描述提示词",
+    describeCacheSize: "Describe cache / 描述缓存条数",
     lumaEnv: "Extra Env / 额外环境变量 (JSON)",
   };
 
@@ -199,6 +202,13 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       })),
       adv(ADVANCED_LABELS.allowedDirs, false, input("allowedDirs")),
       adv(ADVANCED_LABELS.preservePastedImages, false, toggle("preservePastedImages")),
+      adv(ADVANCED_LABELS.describeAtDispatch, false, toggle("describeAtDispatch")),
+      adv(ADVANCED_LABELS.describeCacheSize, false, input("describeCacheSize", "number")),
+      adv(ADVANCED_LABELS.describePrompt, false, react.createElement("textarea", {
+        rows: 3, style: st.textarea,
+        value: state.value.describePrompt || "",
+        onChange: (e) => set("describePrompt", e.target.value),
+      })),
       (function () {
         const ad = state.allowedDirs;
         if (!ad || !Array.isArray(ad.all)) return null;

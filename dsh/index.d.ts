@@ -30,6 +30,13 @@ export interface FreeVisionConfig {
   /** Keep pasted images as durable image blocks so the chat renders native
    *  thumbnails; text-only models get them rewritten to image-reference text. */
   preservePastedImages?: boolean
+  /** At dispatch, replace image blocks with a cached vision description so the
+   *  model answers in one step without calling image_understand. */
+  describeAtDispatch?: boolean
+  /** Default prompt for the at-dispatch image description. */
+  describePrompt?: string
+  /** Vision-description LRU cache capacity (per sha256). */
+  describeCacheSize?: number
   /** Legacy single key (deprecated, migrated to keys) */
   apiKey?: string
 }

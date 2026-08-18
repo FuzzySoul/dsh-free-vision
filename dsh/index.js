@@ -86,8 +86,20 @@ export const Config = z.object({
     .default(''),
   preservePastedImages: z
     .boolean()
-    .description('保留粘贴图片为 image 块，让 dsh 原生在对话里渲染缩略图；纯文本模型视角会在发送时自动改写为图片引用文本 / keep pasted images as durable image blocks so the chat renders native thumbnails; the model-facing request is rewritten to image-reference text for text-only models')
+    .description('保留粘贴图片为 image 块，让 dsh 原生在对话里渲染缩略图；纯文本模型视角会在发送时自动改写为图片文本 / keep pasted images as durable image blocks so the chat renders native thumbnails; the model-facing request is rewritten to image text for text-only models')
     .default(true),
+  describeAtDispatch: z
+    .boolean()
+    .description('分发时直接把图片替换为“已识别的图片描述”，模型不用再调 image_understand，一步到位；描述按图 sha256 缓存 / at dispatch replace image blocks with a cached vision description so the model answers in one step without calling image_understand; results cached by image sha256')
+    .default(true),
+  describePrompt: z
+    .string()
+    .description('分发时默认的图片描述提示词（越详细越能覆盖后续提问）/ default prompt used for at-dispatch image description')
+    .default('请详细描述这张图片的全部内容：画面主体、所有可见文字（原样抄录）、布局/坐标、颜色、界面元素、人物动作等细节。尽量完整，便于后续回答细节问题。'),
+  describeCacheSize: z
+    .number()
+    .description('图片描述缓存条数（按 sha256，进程内 LRU）/ vision-description cache capacity (per sha256, in-process LRU)')
+    .default(64),
 })
 
 const PROXY_VARS = [
@@ -320,24 +332,63 @@ export function imageBlockToMarkdown(attachment) {
 }
 
 /**
- * Rewrite top-level image blocks into text references. Returns the SAME
- * options object when nothing changed; otherwise a (deep-frozen) copy whose
- * non-image blocks and message identity are preserved.
+ * Wrap one image block as a dry text block for the model.
+ * `describe` (optional async) returns a cached vision description; when it
+ * yields text we embed it inline (one-step answer). Otherwise we fall back to
+ * the `![图片](/dsh-free-vision/raw/…)` reference the model can hand to
+ * image_understand.
  */
-export function rewriteImagesToReferences(options, freezeMessage, deepFreeze) {
-  const messages = (options.messages || []).map((message) => {
+export function imageBlockToText(attachment, description) {
+  const id = attachment && (attachment.attachmentId || attachment.id)
+  const ref = typeof id === 'string' && id.length > 0
+    ? `![图片](/dsh-free-vision/raw/${encodeURIComponent(id)})`
+    : ''
+  if (typeof description === 'string' && description.trim()) {
+    const hint = ref ? `\n（如需针对该图继续追问，可调 image_understand，image_source 传 /dsh-free-vision/raw/${encodeURIComponent(String(id))}）` : ''
+    return `【图片已自动识别】\n${description.trim()}${hint}`
+  }
+  return ref
+}
+
+/**
+ * Rewrite top-level image blocks into text (optionally inline vision
+ * descriptions). Returns the SAME options object when nothing changed;
+ * otherwise a (deep-frozen) copy whose non-image blocks and message identity
+ * are preserved. `describe` is an async `(attachment) => string|null`.
+ */
+export async function rewriteImagesToReferences(options, freezeMessage, deepFreeze, describe) {
+  const messages = []
+  for (const message of options.messages || []) {
     const content = message?.content || []
-    if (!content.some((block) => block?.type === 'image')) return message
+    if (!content.some((block) => block?.type === 'image')) {
+      messages.push(message)
+      continue
+    }
     let changed = false
-    const nextContent = content.map((block) => {
-      if (block?.type !== 'image') return block
-      const text = imageBlockToMarkdown(block.attachment)
-      if (typeof text !== 'string') return block
+    const nextContent = []
+    for (const block of content) {
+      if (block?.type !== 'image') {
+        nextContent.push(block)
+        continue
+      }
+      let description = null
+      if (typeof describe === 'function') {
+        try {
+          description = await describe(block.attachment)
+        } catch {
+          description = null
+        }
+      }
+      const text = imageBlockToText(block.attachment, description)
+      if (typeof text !== 'string' || text.length === 0) {
+        nextContent.push(block)
+        continue
+      }
       changed = true
-      return { type: 'text', text }
-    })
-    return changed ? freezeMessage({ ...message, content: nextContent }) : message
-  })
+      nextContent.push({ type: 'text', text })
+    }
+    messages.push(changed ? freezeMessage({ ...message, content: nextContent }) : message)
+  }
   const changed = messages.some((message, index) => message !== options.messages[index])
   if (!changed) return options
   const rewritten = { ...options, messages }
@@ -357,12 +408,14 @@ async function modelCanReadImages(ctx, options) {
 
 /**
  * `llm/stream` waterfall: when the target model cannot take images and the
- * request carries image blocks, rewrite them into `image_understand`-readable
- * text refs and re-dispatch through the same `ctx.llm.stream` the harness uses.
+ * request carries image blocks, rewrite them into inline (cached) descriptions
+ * — or `image_understand`-readable reference text when describing is off or
+ * fails — and re-dispatch through the same `ctx.llm.stream` the harness uses.
+ * Pass `{ describe }` to enable one-step cached descriptions.
  * Re-entrant: the rewritten request has no image blocks, so this listener
  * passes it straight through on the re-dispatch (no infinite loop).
  */
-export function wrapImageRefDispatch(ctx, options, next) {
+export function wrapImageRefDispatch(ctx, options, next, extras = {}) {
   return (async function* () {
     let vision = false
     try {
@@ -376,7 +429,9 @@ export function wrapImageRefDispatch(ctx, options, next) {
       return
     }
     const { freezeMessage, deepFreeze } = await import('@deepseek-ai/dsh-llm')
-    const rewritten = rewriteImagesToReferences(options, freezeMessage, deepFreeze)
+    const rewritten = await rewriteImagesToReferences(
+      options, freezeMessage, deepFreeze, extras.describe,
+    )
     if (rewritten === options) {
       yield* next()
       return
@@ -676,17 +731,123 @@ export function apply(ctx, config = {}) {
     })
   }
 
+  // ── One-step image description (at-dispatch) ───────────────────────────
+  // Instead of forcing the model to locate the image and call image_understand
+  // (an extra LLM round-trip per image — the "many steps" the user saw), the
+  // dispatch rewrite replaces image blocks with this cached description text,
+  // so the model answers in the SAME turn with no tool call. Descriptions are
+  // keyed by the content-addressed sha256 and kept in a small in-process LRU,
+  // so re-placing the same image in later turns / retries costs nothing.
+  // image_understand stays registered for targeted follow-up questions and for
+  // images passed by local path / URL (not pasted).
+  const describeCache = new Map()
+  const describeInFlight = new Map()
+  let engineToolName = null
+
+  const trimDescribeCache = () => {
+    const cap = Math.max(1, Number(getEffective().describeCacheSize) || 64)
+    while (describeCache.size > cap) {
+      const oldest = describeCache.keys().next().value
+      if (oldest === undefined) break
+      describeCache.delete(oldest)
+    }
+  }
+
+  /** One vision call: read bytes → data URI → engine → text. Null on failure. */
+  async function describeFresh(attachment, prompt) {
+    const attachments = ctx.get && ctx.get('attachments')
+    let buffer = null
+    let mime = null
+    if (attachments && typeof attachments.readImage === 'function') {
+      try {
+        const stored = await attachments.readImage(attachment)
+        if (stored && stored.data) {
+          buffer = stored.data
+          mime = (stored.ref && stored.ref.mediaType) || null
+        }
+      } catch {
+        /* fall through to object-file fallback */
+      }
+    }
+    if (!buffer || !mime) {
+      const id = String((attachment && (attachment.attachmentId || attachment.id)) || '')
+      const sha = id.replace(/^sha256:/i, '')
+      if (/^[a-f0-9]{64}$/i.test(sha)) {
+        const hit = await readAttachmentObject(sha)
+        if (hit) { buffer = hit.buffer; mime = hit.mimeType }
+      }
+    }
+    if (!buffer || !mime) return null
+    const live = await ensureConnected()
+    if (!engineToolName) {
+      try {
+        const tools = await live.listTools()
+        engineToolName = tools && tools.tools && tools.tools[0] && tools.tools[0].name
+      } catch {
+        engineToolName = null
+      }
+    }
+    if (!engineToolName) return null
+    const source = dataUriFor(buffer, mime)
+    const ac = new AbortController()
+    const timer = setTimeout(() => ac.abort(), Math.max(5000, getEffective().toolCallTimeoutMs || 200000))
+    let result
+    try {
+      result = await live.callTool(
+        { name: engineToolName, arguments: { image_source: source, prompt: prompt || getEffective().describePrompt, task_type: 'general' } },
+        undefined,
+        { signal: ac.signal },
+      )
+    } catch (error) {
+      log.warn(`[${label()}] dispatch describe failed: ${error?.message || error}`)
+      return null
+    } finally {
+      clearTimeout(timer)
+    }
+    if (result && result.isError) return null
+    const text = extractText(result && result.content)
+    return text && text.trim ? text.trim() : null
+  }
+
+  /** Cached + deduped description for one durable image ref (sha256 keyed). */
+  async function describeForDispatch(attachment) {
+    const id = attachment && (attachment.attachmentId || attachment.id)
+    if (!id) return null
+    const cached = describeCache.get(id)
+    if (cached !== undefined) {
+      describeCache.delete(id)
+      describeCache.set(id, cached) // LRU touch
+      return cached
+    }
+    if (describeInFlight.has(id)) return describeInFlight.get(id)
+    const pending = (async () => {
+      const text = await describeFresh(attachment, null)
+      if (text) {
+        describeCache.set(id, text)
+        trimDescribeCache()
+      }
+      return text
+    })()
+    describeInFlight.set(id, pending)
+    try {
+      return await pending
+    } finally {
+      describeInFlight.delete(id)
+    }
+  }
+
   // ── Pasted-image display bridge (host side) ────────────────────────────
   // dsh's Web UI renders durable image content-blocks as native thumbnails in
   // the chat, but text-only models are rejected at admission and cannot ingest
   // image bytes anyway. To let a pasted image *show* in the conversation while
-  // a text-only model still analyzes it, we:
+  // a text-only model still answers about it in ONE step, we:
   //   1. relax admission (`llm.resolveModelInfo` shim) so image sends are
   //      admitted for non-vision models — the durable session message keeps
   //      the real image block, which the UI renders as a thumbnail, and
-  //   2. rewrite image blocks → `![图片](/dsh-free-vision/raw/…)` text right
-  //      before the request reaches the model (`llm/stream`), so the model
-  //      calls image_understand with a reference the plugin can resolve.
+  //   2. rewrite image blocks → cached vision description text right before
+  //      the request reaches the model (`llm/stream`), so the model sees the
+  //      image content inline and never needs image_understand (reference text
+  //      is the fallback when describing fails / is disabled).
   // The durable session message is never mutated: the rewrite only affects the
   // adapter-facing request (same pattern as dsh-image-pathify /
   // dsh-deepseek-vision). Scope is nested so the plugin still loads on hosts
@@ -724,12 +885,17 @@ export function apply(ctx, config = {}) {
         }
       })
 
-      // Rewrite image blocks to text references at dispatch for non-vision
-      // models. Re-entrant: the rewritten request carries no image blocks, so
-      // this listener no-ops on the re-dispatch (no infinite loop).
+      // Rewrite image blocks to (cached) description text at dispatch for
+      // non-vision models, so the model never has to locate the image or call
+      // image_understand — ONE step. When describeAtDispatch is off or a
+      // description fails, fall back to the `![图片](/dsh-free-vision/raw/…)`
+      // reference text (model can still call image_understand). Re-entrant:
+      // the rewritten request carries no image blocks, so this listener no-ops
+      // on the re-dispatch (no infinite loop).
       eventCtx.on('llm/stream', (options, next) => {
-        if (getEffective().preservePastedImages === false) return next()
-        return wrapImageRefDispatch(scope, options, next)
+        return wrapImageRefDispatch(scope, options, next, {
+          describe: getEffective().describeAtDispatch !== false ? describeForDispatch : null,
+        })
       })
     })
   }

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-08-18
+
+### Added / Changed — 一步到位：粘贴图片直接给出描述，秒答
+
+之前即便图片已在对话里显示缩略图（v1.0.6），纯文本模型仍要自己去“找图→认图→调
+`image_understand`”，多出好几步大语言模型往返，用户体感很慢（“不能一步完成吗”）。
+
+本版改为社区最成熟的 one-step 方案（同 `dsh-deepseek-vision`）：
+
+- **分发时直接内联图片描述**：在 `llm/stream` 分发时，对纯文本模型把 image 块替换成
+  “已自动识别的图片描述文本”，模型在同一回合直接看到内容并回答 —— **全程 0 次工具调用，
+  1 步完成**；真实 E2E（隔离 dsh web + DeepSeek V4 Flash）确认 model 的 think 原文为
+  “already auto-recognized … answer directly”，整轮 `1 turns · 1 steps`。
+- **描述按 sha256 缓存（进程内 LRU）**：同一张图重复出现/追问时不再调视觉 API，
+  E2E 中第二次出现的 TTFT 从 19s 降到 3.9s。
+- `image_understand` 保留用于**精确/细分追问**（如 OCR 逐字转写、坐标、颜色），
+  可继续传 `/dsh-free-vision/raw/<id>`；E2E 已确认该通道可用。
+- 新配置：`describeAtDispatch`（默认开）、`describePrompt`（默认详细描述提示词）、
+  `describeCacheSize`（默认 64），均可在 设置 → Free Vision → 高级设置 里改；
+  关闭 `describeAtDispatch` 即退回 v1.0.6 的“改写成引用文本再让模型调工具”行为。
+- 性能实测（本机）：引擎 spawn+连接 ~333ms；图片 593KB→base64 790KB 为毫秒级；
+  一次真实视觉 API ~1.9s（大头在厂商 API，已用缓存消除重复）。
+
+## [1.0.6] - 2026-08-18
+
 ### Added
 
 - **Pasted images now show in the conversation.** Previously the client

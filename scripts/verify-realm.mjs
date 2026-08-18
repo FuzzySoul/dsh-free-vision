@@ -43,7 +43,7 @@ const options = {
     { role: 'user', content: [{ type: 'text', text: 'hi' }, REF] },
   ],
 }
-const out = rewriteImagesToReferences(options, freezeMessage, deepFreeze)
+const out = await rewriteImagesToReferences(options, freezeMessage, deepFreeze)
 ok(out !== options && out.messages[0].content[1].type === 'text', 'rewrite turns image block into text ref')
 ok(out.messages[0].content[1].text.startsWith('![图片]('), 'rewritten text is reference form')
 
