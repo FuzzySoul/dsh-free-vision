@@ -565,7 +565,12 @@ export function apply(ctx, config = {}) {
                   log.error(`[${label()}] re-sync after save failed: ${error?.message || error}`)
                 })
               }
-              sendJson(res, 200, { ok: true, value: effectiveConfig(config), hasKey: !!apiKey() })
+              sendJson(res, 200, {
+                ok: true,
+                value: effectiveConfig(config),
+                hasKey: !!apiKey(),
+                allowedDirs: resolveAllowedDirs(effectiveConfig(config)),
+              })
             } catch (error) {
               sendJson(res, 400, { ok: false, error: String(error?.message || error) })
             }

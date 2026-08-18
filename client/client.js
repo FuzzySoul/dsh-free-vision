@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       })
         .then((r) => r.json())
         .then((body) => {
-          if (body.ok) setState((s) => ({ ...s, saving: false, saved: true, value: body.value || s.value, hasKey: !!body.value?.apiKey }));
+          if (body.ok) setState((s) => ({ ...s, saving: false, saved: true, value: body.value || s.value, hasKey: !!body.value?.apiKey, allowedDirs: body.allowedDirs || s.allowedDirs }));
           else setState((s) => ({ ...s, saving: false, error: body.error || "save failed" }));
         })
         .catch((e) => setState((s) => ({ ...s, saving: false, error: String((e && e.message) || e) })));
