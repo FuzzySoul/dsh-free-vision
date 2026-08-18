@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-08-18
+
+### Added
+
+- Settings UI now exposes an **Allowed Dirs / 允许读取的图片目录** field in
+  Advanced settings, so users can see and edit the image read whitelist
+  (previously the `allowedDirs` config existed but was invisible in the UI).
+- The page shows the **Effective whitelist** (workdir + home defaults plus any
+  user-added roots, resolved by the backend), and it refreshes live after save.
+- A warning in Advanced settings points users back to this field when the
+  engine reports `Access denied: image path is outside the allowed directory`.
+
+### Added
+
+- All-in-one GitHub Actions release workflow (`.github/workflows/release.yml`)
+  triggered on push of a `v*` tag: runs tests, `npm publish`, packs a `.tgz`
+  and creates/updates the GitHub Release with CHANGELOG-based notes.
+
 ## [1.0.2] - 2026-08-18
 
 ### Fixed
