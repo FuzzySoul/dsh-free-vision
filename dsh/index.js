@@ -288,7 +288,12 @@ export function apply(ctx, config = {}) {
       MODEL_PROVIDER: prov,
       ...(key ? { [PROVIDER_KEY_ENV[prov] || 'DASHSCOPE_API_KEY']: key } : {}),
       ...(baseURL ? { [baseEnvName]: baseURL } : {}),
-      ...(cfg.modelName ? { MODEL_NAME: cfg.modelName, ...(prov === 'custom' ? { CUSTOM_MODEL_NAME: cfg.modelName } : {}) } : {}),
+      // luma-mcp's config.js throws "CUSTOM_MODEL_NAME is required when
+      // MODEL_PROVIDER=custom" unless CUSTOM_MODEL_NAME is set. Always forward
+      // it for the custom provider (falling back to luma-mcp's own default) so
+      // the engine starts even when modelName is left empty.
+      ...(prov === 'custom' ? { CUSTOM_MODEL_NAME: cfg.modelName || 'custom-model' } : {}),
+      ...(cfg.modelName ? { MODEL_NAME: cfg.modelName } : {}),
       ...(cfg.maxTokens ? { MAX_TOKENS: String(cfg.maxTokens) } : {}),
       ...(cfg.temperature != null ? { TEMPERATURE: String(cfg.temperature) } : {}),
       ...(cfg.multiCrop === false ? { MULTI_CROP: 'false' } : {}),

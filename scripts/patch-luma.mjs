@@ -58,10 +58,14 @@ function patchFile(file, replacements) {
 
 // image-processor.js: allow extra image roots via LUMA_ALLOWED_DIRS (env,
 // ';' or ',' separated). The plugin passes the configured workspace roots.
+// NOTE: the marker comment MUST match the string patchFile() uses for its
+// idempotency check (dsh-free-vision-base-url-override). Otherwise a second
+// run (e.g. reinstall) fails to see this file as already patched and aborts
+// because the source pattern is already replaced.
 patchFile('image-processor.js', [
   [
     `const allowedDirs = [process.cwd(), os.homedir()].map((dir) => path.normalize(dir).toLowerCase());`,
-    `const allowedDirs = [process.cwd(), os.homedir(), ...(process.env.LUMA_ALLOWED_DIRS ? process.env.LUMA_ALLOWED_DIRS.split(/[;,]/).map((d) => d.trim()).filter(Boolean) : [])].map((dir) => path.normalize(dir).toLowerCase()); // dsh-free-vision-allowed-dirs`,
+    `const allowedDirs = [process.cwd(), os.homedir(), ...(process.env.LUMA_ALLOWED_DIRS ? process.env.LUMA_ALLOWED_DIRS.split(/[;,]/).map((d) => d.trim()).filter(Boolean) : [])].map((dir) => path.normalize(dir).toLowerCase()); // dsh-free-vision-base-url-override`,
   ],
 ])
 
