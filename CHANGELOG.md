@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-08-18
+
 ### Fixed
 
 - Text-only models can now hand the vision tool a pasted image **reference** and
