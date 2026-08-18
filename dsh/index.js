@@ -84,6 +84,10 @@ export const Config = z.object({
     .string()
     .description('允许读取图片的额外目录（;或,分隔，默认仅引擎工作目录与用户主目录）/ extra allowed image root dirs (semicolon/comma separated)')
     .default(''),
+  preservePastedImages: z
+    .boolean()
+    .description('保留粘贴图片为 image 块，让 dsh 原生在对话里渲染缩略图；纯文本模型视角会在发送时自动改写为图片引用文本 / keep pasted images as durable image blocks so the chat renders native thumbnails; the model-facing request is rewritten to image-reference text for text-only models')
+    .default(true),
 })
 
 const PROXY_VARS = [
@@ -289,6 +293,138 @@ function extractText(content) {
     .filter((block) => block?.type === 'text' && typeof block.text === 'string')
     .map((block) => block.text)
     .join('\n')
+}
+
+// ═══ Pasted-image display bridge helpers ═══════════════════════════════════
+// dsh's Web UI renders durable image content-blocks as native thumbnails in
+// the chat. To let a pasted image show there while a text-only model still
+// analyzes it, these helpers (a) relax admission so non-vision models accept
+// image sends and (b) at `llm/stream` dispatch rewrite image blocks into the
+// `![图片](/dsh-free-vision/raw/…)` reference text `image_understand`'s
+// resolver understands. The durable session message is never mutated.
+// @deepseek-ai/cordis + /dsh-llm are imported lazily so the repo's own tests
+// (and hosts without an `llm` service) never trip on them.
+
+/** True when any top-level message content carries an image block. */
+export function messagesContainImage(messages) {
+  return (messages || []).some((message) =>
+    (message?.content || []).some((block) => block?.type === 'image'),
+  )
+}
+
+/** Build the durable reference text a text-only model hands to image_understand. */
+export function imageBlockToMarkdown(attachment) {
+  const id = attachment && (attachment.attachmentId || attachment.id)
+  if (typeof id !== 'string' || id.length === 0) return null
+  return `![图片](/dsh-free-vision/raw/${encodeURIComponent(id)})`
+}
+
+/**
+ * Rewrite top-level image blocks into text references. Returns the SAME
+ * options object when nothing changed; otherwise a (deep-frozen) copy whose
+ * non-image blocks and message identity are preserved.
+ */
+export function rewriteImagesToReferences(options, freezeMessage, deepFreeze) {
+  const messages = (options.messages || []).map((message) => {
+    const content = message?.content || []
+    if (!content.some((block) => block?.type === 'image')) return message
+    let changed = false
+    const nextContent = content.map((block) => {
+      if (block?.type !== 'image') return block
+      const text = imageBlockToMarkdown(block.attachment)
+      if (typeof text !== 'string') return block
+      changed = true
+      return { type: 'text', text }
+    })
+    return changed ? freezeMessage({ ...message, content: nextContent }) : message
+  })
+  const changed = messages.some((message, index) => message !== options.messages[index])
+  if (!changed) return options
+  const rewritten = { ...options, messages }
+  return Object.isFrozen(options) ? deepFreeze(rewritten) : rewritten
+}
+
+/** True when the dispatch target model declares image input (unknown → false). */
+async function modelCanReadImages(ctx, options) {
+  let info
+  try {
+    info = await ctx.llm.resolveModelInfo(options.provider, options.model, options.signal)
+  } catch {
+    info = undefined
+  }
+  return info?.inputModalities !== undefined && info.inputModalities.includes('image')
+}
+
+/**
+ * `llm/stream` waterfall: when the target model cannot take images and the
+ * request carries image blocks, rewrite them into `image_understand`-readable
+ * text refs and re-dispatch through the same `ctx.llm.stream` the harness uses.
+ * Re-entrant: the rewritten request has no image blocks, so this listener
+ * passes it straight through on the re-dispatch (no infinite loop).
+ */
+export function wrapImageRefDispatch(ctx, options, next) {
+  return (async function* () {
+    let vision = false
+    try {
+      vision = await modelCanReadImages(ctx, options)
+    } catch {
+      vision = false
+    }
+    options.signal?.throwIfAborted()
+    if (vision || !messagesContainImage(options.messages)) {
+      yield* next()
+      return
+    }
+    const { freezeMessage, deepFreeze } = await import('@deepseek-ai/dsh-llm')
+    const rewritten = rewriteImagesToReferences(options, freezeMessage, deepFreeze)
+    if (rewritten === options) {
+      yield* next()
+      return
+    }
+    options.signal?.throwIfAborted()
+    yield* ctx.llm.stream(rewritten)
+  })()
+}
+
+/**
+ * Admission shim: while an attachment store is mounted, drop `inputModalities`
+ * from non-vision model info so the host's image-admission gates accept the
+ * send (the capability becomes "unknown"). The durable session message then
+ * keeps the real image block — which the Web UI renders as a thumbnail — and
+ * the `llm/stream` rewrite above strips it before the model actually sees it.
+ * Returns a disposer that restores the original `resolveModelInfo`.
+ */
+export async function installAdmissionShim(ctx) {
+  const { symbols } = await import('@deepseek-ai/cordis')
+  const llm = (ctx?.get?.('llm') || ctx?.llm)?.[symbols.original] ?? ctx?.get?.('llm') ?? ctx?.llm
+  const original = typeof llm?.resolveModelInfo === 'function'
+    ? llm.resolveModelInfo.bind(llm)
+    : null
+  if (typeof original !== 'function') return () => {}
+  const wrapped = async (provider, model, signal) => {
+    const info = await original(provider, model, signal)
+    if (ctx?.get?.('attachments') === undefined) return info
+    if (
+      info?.inputModalities === undefined ||
+      (Array.isArray(info.inputModalities) && info.inputModalities.includes('image'))
+    ) {
+      return info
+    }
+    const { inputModalities: _dropped, ...rest } = info
+    return rest
+  }
+  try {
+    llm.resolveModelInfo = wrapped
+  } catch {
+    return () => {}
+  }
+  return () => {
+    try {
+      if (llm.resolveModelInfo === wrapped) llm.resolveModelInfo = original
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 export function apply(ctx, config = {}) {
@@ -537,6 +673,64 @@ export function apply(ctx, config = {}) {
     // Fire-and-forget: tools appear once the vision engine is connected (a few seconds).
     syncTools().catch((error) => {
       log.error(`[${label()}] connection failed, tools not registered: ${error?.message || error}`)
+    })
+  }
+
+  // ── Pasted-image display bridge (host side) ────────────────────────────
+  // dsh's Web UI renders durable image content-blocks as native thumbnails in
+  // the chat, but text-only models are rejected at admission and cannot ingest
+  // image bytes anyway. To let a pasted image *show* in the conversation while
+  // a text-only model still analyzes it, we:
+  //   1. relax admission (`llm.resolveModelInfo` shim) so image sends are
+  //      admitted for non-vision models — the durable session message keeps
+  //      the real image block, which the UI renders as a thumbnail, and
+  //   2. rewrite image blocks → `![图片](/dsh-free-vision/raw/…)` text right
+  //      before the request reaches the model (`llm/stream`), so the model
+  //      calls image_understand with a reference the plugin can resolve.
+  // The durable session message is never mutated: the rewrite only affects the
+  // adapter-facing request (same pattern as dsh-image-pathify /
+  // dsh-deepseek-vision). Scope is nested so the plugin still loads on hosts
+  // without an `llm` service; when the bridge is unavailable the client hook
+  // falls back to the pure-text rewrite and nothing regresses.
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['llm', 'attachments'], (scope) => {
+      // Defensive: some hosts/tests mount a scope without an `llm` service;
+      // then the bridge is simply skipped (client hook falls back to text).
+      const llm = scope?.llm || (typeof scope?.get === 'function' ? scope.get('llm') : null)
+      if (!llm || typeof llm.resolveModelInfo !== 'function') return
+      const eventCtx = typeof scope?.on === 'function' ? scope : ctx
+      if (typeof eventCtx?.on !== 'function') return
+
+      let disposeAdmission = null
+      let admissionPromise = null
+      const installAdmission = () => {
+        if (admissionPromise) return
+        if (getEffective().preservePastedImages !== false) {
+          admissionPromise = installAdmissionShim(scope).then((dispose) => {
+            disposeAdmission = dispose
+            return dispose
+          })
+          admissionPromise.catch(() => {
+            admissionPromise = null
+          })
+        }
+      }
+      installAdmission()
+      disposers.push(() => {
+        admissionPromise = null
+        if (disposeAdmission) {
+          disposeAdmission()
+          disposeAdmission = null
+        }
+      })
+
+      // Rewrite image blocks to text references at dispatch for non-vision
+      // models. Re-entrant: the rewritten request carries no image blocks, so
+      // this listener no-ops on the re-dispatch (no infinite loop).
+      eventCtx.on('llm/stream', (options, next) => {
+        if (getEffective().preservePastedImages === false) return next()
+        return wrapImageRefDispatch(scope, options, next)
+      })
     })
   }
 

@@ -30,6 +30,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     multiCrop: "Multi-crop / 大图多裁剪",
     toolCallTimeoutMs: "Timeout (ms) / 超时",
     allowedDirs: "Allowed Dirs / 允许读取的图片目录",
+    preservePastedImages: "Preserve pasted thumbnails / 保留粘贴图片显示（推荐开启）",
     lumaEnv: "Extra Env / 额外环境变量 (JSON)",
   };
 
@@ -197,6 +198,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
         },
       })),
       adv(ADVANCED_LABELS.allowedDirs, false, input("allowedDirs")),
+      adv(ADVANCED_LABELS.preservePastedImages, false, toggle("preservePastedImages")),
       (function () {
         const ad = state.allowedDirs;
         if (!ad || !Array.isArray(ad.all)) return null;
@@ -277,8 +279,55 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     }
   }
 
-  // Wrap the conversation send so image-bearing sends become text prompts
-  // carrying free-vision image references (skipped when the send has no images).
+  // Whether the host bridge is keeping image blocks (read live so a settings
+  // change applies without restart). Defaults to preserve when unreachable, so
+  // pasted images show as native thumbnails whenever the host can do it.
+  async function hostPreservesPastedImages() {
+    try {
+      const res = await fetch("/dsh-free-vision/config", { cache: "no-store" });
+      const body = await res.json().catch(() => null);
+      if (!body || !body.value) return true;
+      return body.value.preservePastedImages !== false;
+    } catch {
+      return true;
+    }
+  }
+
+  // Legacy fallback: upload each draft image and resend the message as a
+  // pure-text prompt carrying `![图片](/dsh-free-vision/raw/…)` references.
+  // Used only when the native (image-block-preserving) send was refused, so
+  // image analysis still works even though the chat shows no thumbnail.
+  async function legacyTextRewrite(session, text, imageIds, mode, attachments, face) {
+    const refs = [];
+    for (const attachment of attachments) {
+      const file = attachment && attachment.file;
+      if (!file) { refs.length = 0; break; }
+      const read = await readFileAsBase64(file);
+      if (!read.ok) { refs.length = 0; break; }
+      const uploaded = await uploadForFreeVision(read.base64, file.type || "", file.name || "");
+      if (!uploaded.ok) { refs.length = 0; break; }
+      refs.push(uploaded.markdown);
+    }
+    if (refs.length !== attachments.length) {
+      // Upload failed; fall back to the default send so we don't lose the message.
+      return face._dshFvOriginalSend(session, text, imageIds, mode);
+    }
+    const fullText = [text && text.trim ? text.trim() : "", ...refs].filter((part) => part !== "").join("\n");
+    const result = await session.prompt([{ type: "text", text: fullText }], mode);
+    if (!result || !result.ok) {
+      throw new Error(`conversation.send failed: ${(result && result.error && result.error.code) || "unknown"}`);
+    }
+    for (const id of imageIds) face.releaseDraftImage(id);
+  }
+
+  // Wrap the conversation send so image-bearing sends are SAFE for text-only
+  // models. Primary path: let the native send go through unchanged — the host
+  // bridge relaxes admission and rewrites image blocks to image_understand
+  // references at dispatch, so the durable session keeps the real image block
+  // and the chat renders the native thumbnail. Fallback: if the native send is
+  // refused (host bridge off / older host), resend as a pure-text prompt
+  // carrying `![图片](/dsh-free-vision/raw/…)` references so analysis still
+  // works even though the thumbnail is lost.
   function installSendHook(conversation) {
     const face = conversation;
     if (!face || typeof face !== "object") return;
@@ -287,6 +336,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     if (face[SEND_HOOK_MARKER]) return;
 
     const original = face.sendSession;
+    face._dshFvOriginalSend = original;
     face.sendSession = async (session, text, imageIds, mode) => {
       if (!imageIds || imageIds.length === 0) {
         return original.call(face, session, text, imageIds, mode);
@@ -295,26 +345,18 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       if (!attachments || attachments.length !== imageIds.length) {
         return original.call(face, session, text, imageIds, mode);
       }
-      const refs = [];
-      for (const attachment of attachments) {
-        const file = attachment && attachment.file;
-        if (!file) { refs.length = 0; break; }
-        const read = await readFileAsBase64(file);
-        if (!read.ok) { refs.length = 0; break; }
-        const uploaded = await uploadForFreeVision(read.base64, file.type || "", file.name || "");
-        if (!uploaded.ok) { refs.length = 0; break; }
-        refs.push(uploaded.markdown);
+      const preserve = await hostPreservesPastedImages();
+      if (!preserve) {
+        return legacyTextRewrite(session, text, imageIds, mode, attachments, face);
       }
-      if (refs.length !== attachments.length) {
-        // Upload failed; fall back to the default send so we don't lose the message.
-        return original.call(face, session, text, imageIds, mode);
+      try {
+        return await original.call(face, session, text, imageIds, mode);
+      } catch (error) {
+        // Native send blocked (admission still enforced because the host bridge
+        // is off, or an older host) — degrade gracefully to the text rewrite.
+        void error;
+        return legacyTextRewrite(session, text, imageIds, mode, face.draftImages(imageIds), face);
       }
-      const fullText = [text && text.trim ? text.trim() : "", ...refs].filter((part) => part !== "").join("\n");
-      const result = await session.prompt([{ type: "text", text: fullText }], mode);
-      if (!result || !result.ok) {
-        throw new Error(`conversation.send failed: ${(result && result.error && result.error.code) || "unknown"}`);
-      }
-      for (const id of imageIds) face.releaseDraftImage(id);
     };
     face[SEND_HOOK_MARKER] = true;
   }

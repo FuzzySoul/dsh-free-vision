@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pasted images now show in the conversation.** Previously the client
+  rewrite destroyed the image block and resent the message as pure text with a
+  `![图片](/dsh-free-vision/raw/…)` reference, so the chat showed raw markdown
+  instead of the image. The host now keeps the durable image block (the Web UI
+  renders its native thumbnail, same pattern as `dsh-image-pathify` /
+  `dsh-deepseek-vision`) and only rewrites image blocks → text references at
+  `llm/stream` dispatch for models that cannot take images, so the text-only
+  model still calls `image_understand`.
+  - `llm.resolveModelInfo` admission shim: drops `inputModalities` from
+    non-vision models while an attachment store is mounted, so image sends are
+    admitted and the session keeps the real image block.
+  - `llm/stream` waterfall: non-vision dispatch with image blocks re-dispatches
+    through `ctx.llm.stream` with each image block rewritten to the
+    `![图片](/dsh-free-vision/raw/<id>)` reference form `image_understand`
+    resolves; vision-capable models pass through untouched.
+  - New config `preservePastedImages` (default `true`) in Settings → Free
+    Vision → Advanced; set to `false` to restore the old pure-text behavior.
+  - Client `sendSession` hook now prefers the native (thumbnail-preserving)
+    send and only falls back to the legacy text-rewrite if the host refuses the
+    image send — so nothing regresses on older hosts and in constrained
+    surfaces (e.g. minimal/compact renderers) where outputting image blocks is
+    undesirable.
+  - Real-runtime verification against the harness's own cordis/dsh-llm
+    (`scripts/verify-realm.mjs`) plus unit tests for the rewrite helpers.
+
 ## [1.0.5] - 2026-08-18
 
 ### Fixed

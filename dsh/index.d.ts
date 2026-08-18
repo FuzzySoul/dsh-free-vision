@@ -25,6 +25,11 @@ export interface FreeVisionConfig {
   toolCallTimeoutMs?: number
   /** Extra env vars passed to the vision engine */
   lumaEnv?: Record<string, string>
+  /** Extra allowed image root dirs (; or , separated) */
+  allowedDirs?: string
+  /** Keep pasted images as durable image blocks so the chat renders native
+   *  thumbnails; text-only models get them rewritten to image-reference text. */
+  preservePastedImages?: boolean
   /** Legacy single key (deprecated, migrated to keys) */
   apiKey?: string
 }
