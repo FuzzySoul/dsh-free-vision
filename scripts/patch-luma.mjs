@@ -55,6 +55,16 @@ function patchFile(file, replacements) {
   console.log(`[patch-luma] patched ${file}`)
 }
 
+
+// image-processor.js: allow extra image roots via LUMA_ALLOWED_DIRS (env,
+// ';' or ',' separated). The plugin passes the configured workspace roots.
+patchFile('image-processor.js', [
+  [
+    `const allowedDirs = [process.cwd(), os.homedir()].map((dir) => path.normalize(dir).toLowerCase());`,
+    `const allowedDirs = [process.cwd(), os.homedir(), ...(process.env.LUMA_ALLOWED_DIRS ? process.env.LUMA_ALLOWED_DIRS.split(/[;,]/).map((d) => d.trim()).filter(Boolean) : [])].map((dir) => path.normalize(dir).toLowerCase()); // dsh-free-vision-allowed-dirs`,
+  ],
+])
+
 // config.js: read provider-specific base URL env vars and expose config.baseUrl
 patchFile('config.js', [
   [
