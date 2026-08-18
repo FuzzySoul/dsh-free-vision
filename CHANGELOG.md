@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-08-18
+
+### Fixed
+
+- `postinstall` patch script is now truly idempotent: the `image-processor.js`
+  patch uses the same marker string that `patchFile()` checks for, so re-running
+  the script during reinstall/upgrade no longer crashes on a missing pattern.
+- Custom provider now always forwards `CUSTOM_MODEL_NAME` (defaulting to
+  luma-mcp's `custom-model`), so `modelProvider: custom` starts the engine even
+  when `modelName` is left empty.
+
+
 ## [1.0.1] - 2026-08-17
 
 ### Fixed
@@ -127,7 +139,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Zero MCP config: the vision engine ships as a package dependency, spawned in-process.
 - Proxy env vars stripped from the engine process (mainland-China API direct connect).
 
-[Unreleased]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/FuzzySoul/dsh-free-vision/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/FuzzySoul/dsh-free-vision/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/FuzzySoul/dsh-free-vision/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/FuzzySoul/dsh-free-vision/compare/v0.3.2...v0.3.3
