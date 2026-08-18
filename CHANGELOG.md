@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Text-only models can now hand the vision tool a pasted image **reference** and
+  have it "just work". Previously the durable `![图片](/dsh-free-vision/raw/<id>…)`
+  markdown the client pastes into the conversation could not be consumed by the
+  plugin's own engine-proxied `image_understand` tool: the engine's SSRF guard
+  blocks the loopback `127.0.0.1` URL, its extension-based sniffing rejects the
+  extension-less content-addressed store files, and its narrower allowed-dirs
+  policy rejects `/tmp`-style downloads. The tool now resolves references,
+  content ids, and attachment object paths **on the host side** into a
+  `data:` URI before the engine sees them, so all three failure modes are
+  bypassed in one step.
+
+  - Resolves `![图片](/dsh-free-vision/raw/…)` / `[image attachment …]` /
+    `sha256:<hex64>` / `…/objects/<xx>/<hex64>` references (preferring the
+    embedded durable `?ref=` and the in-process registry, falling back to the
+    content-addressed file on disk).
+  - Local paths are allowlisted on the host (reusing the existing
+    `allowedDirs` resolution), sniffed, and sent as a `data:` URI, so the
+    plugin's wider user-extensible whitelist is the policy instead of the
+    engine's.
+  - More actionable error messages (what the allowed roots are, how to add
+    one, how to pass the reference) instead of the engine's opaque
+    "outside the allowed directory".
+
 ## [1.0.4] - 2026-08-18
 
 ### Added

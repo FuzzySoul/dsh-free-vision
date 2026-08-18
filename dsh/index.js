@@ -21,7 +21,9 @@
 // otherwise the API call fails (502 Bad Gateway).
 import { createRequire } from 'node:module'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import path from 'node:path'
 import z from '@deepseek-ai/schemastery'
 
 const require = createRequire(import.meta.url)
@@ -466,7 +468,9 @@ export function apply(ctx, config = {}) {
           'Use whenever the model cannot see an image the user references: local file path, http(s) URL, ' +
           'or data URI of a screenshot, code error, UI layout, document or photo. ' +
           '看图片/截图/报错/OCR/界面分析：传入图片路径、URL 或 base64（PNG/JPG/WebP/GIF，最大约10MB），' +
-          '配合 prompt 提问与 task_type 任务类型。',
+          '配合 prompt 提问与 task_type 任务类型。' +
+          ' 粘贴的图片可直接传其 markdown 引用（![图片](/dsh-free-vision/raw/...) 或 [image attachment ...]），' +
+          '插件会自动解析成图片字节；宿主内网地址（127.0.0.1 等）的 URL 无法被引擎拉取，遇到插件自身的引用请直接用引用原文，不要手动拼接 URL。',
         parameters: tool.inputSchema || { type: 'object', properties: {} },
         output: {
           schema: {
@@ -495,9 +499,18 @@ export function apply(ctx, config = {}) {
         }),
         async execute(args, exec) {
           const live = await ensureConnected()
+          // Resolve plugin-managed references / local paths to data: URIs on
+          // the host side first: the engine can neither fetch loopback URLs
+          // (its SSRF guard blocks 127.0.0.1) nor read the extension-less
+          // content-addressed files the attachment store writes, nor reach
+          // paths outside its own (narrower) allowed-dirs policy.
+          const nextArgs = await resolveImageSource(args, {
+            ctx,
+            allowedDirs: resolveAllowedDirs(getEffective()).all,
+          })
           // SDK 1.25+ signature: callTool(params, resultSchema?, options?)
           const result = await live.callTool(
-            { name: tool.name, arguments: args },
+            { name: tool.name, arguments: nextArgs },
             undefined,
             { signal: exec.signal },
           )
@@ -770,6 +783,202 @@ async function handleRaw(ctx, id, url, res) {
   }
 }
 
+// ═════════════════════════════════════════════════════════════════════════
+// Image-source resolution: host side turns dsh-managed image references and
+// local paths into data: URIs before the vision engine sees them, so the
+// engine never has to re-fetch loopback URLs (its SSRF guard blocks
+// 127.0.0.1), guess formats from extension-less content-addressed files, or
+// enforce its own narrower allowed-dirs policy.
+// ═════════════════════════════════════════════════════════════════════════
+
+/** Root of the host attachment store used for object-file fallback reads. */
+function attachmentStoreRoot() {
+  return path.join(homedir(), '.dsh', 'attachments', 'v1')
+}
+
+/** Build a data: URI from raw bytes after sniffing its MIME type. */
+function dataUriFor(buffer, mimeType) {
+  return `data:${mimeType};base64,${Buffer.from(buffer).toString('base64')}`
+}
+
+/**
+ * Parse a pasted-image reference into `{ id, ref? }`:
+ *   - `![图片](/dsh-free-vision/raw/<id>?ref=<enc JSON>)`  durable markdown
+ *   - `/dsh-free-vision/raw/<id>`                          bare route path
+ *   - `http(s)://host/dsh-free-vision/raw/<id>...`         absolute URL form
+ *   - `[image attachment <id-or-ref>]`                     host note form
+ *   - `sha256:<hex64>`                                     bare content id
+ *   - `.../objects/<xx>/<hex64>`                           attachment object path
+ * Returns null when the input is not a dsh-managed image reference.
+ */
+function parseImageReference(input) {
+  if (typeof input !== 'string') return null
+  let id = null
+  let ref = null
+  let malformed = false
+
+  const raw = input.match(/\/dsh-free-vision\/raw\/([^?\s)\]']+)(?:\?ref=([^)\s\]']+))?/)
+  if (raw) {
+    malformed = true
+    try {
+      const decodedId = decodeURIComponent(raw[1])
+      if (/^sha256:[a-f0-9]{64}$/i.test(decodedId)) id = decodedId
+    } catch {
+      id = null
+    }
+    if (id && raw[2]) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(raw[2]))
+        if (parsed && typeof parsed === 'object' && String(parsed.attachmentId).toLowerCase() === id.toLowerCase()) {
+          ref = parsed
+        }
+      } catch {
+        /* malformed query -> rely on registry / object-file fallback */
+      }
+    }
+  }
+
+  if (!id) {
+    const note = input.match(/\[image attachment\s*([^\]]+)\]/i)
+    if (note) {
+      malformed = true
+      const inner = note[1].trim()
+      const innerRaw = inner.match(/\/dsh-free-vision\/raw\/([^?\s)\]']+)/)
+      id = innerRaw ? decodeURIComponent(innerRaw[1]) : inner
+    }
+  }
+
+  if (!id) {
+    const bare = input.match(/\bsha256:[a-f0-9]{64}\b/i)
+    if (bare) id = bare[0]
+    else if (/sha256:/i.test(input)) malformed = true
+  }
+
+  if (!id) {
+    const obj = input.match(/objects[\\/][0-9a-f]{2}[\\/]([0-9a-f]{64})/i)
+    if (obj) id = `sha256:${obj[1]}`
+  }
+
+  if (id) id = id.toLowerCase()
+  // A raw-route / sha256 / [image attachment] shape that failed validation is
+  // still a reference attempt — flag it so the caller reports an
+  // "unresolvable reference" error instead of a confusing "file not found".
+  return id
+    ? { id, ref }
+    : malformed
+      ? { id: null, ref: null, malformed: true }
+      : null
+}
+
+/** Best-effort: read a content-addressed object file and sniff its MIME. */
+async function readAttachmentObject(sha256hex, root = attachmentStoreRoot()) {
+  const p = path.join(root, 'objects', sha256hex.slice(0, 2), sha256hex)
+  try {
+    const buffer = await readFile(p)
+    const mimeType = sniffImageType(Buffer.from(buffer))
+    if (!mimeType) return null
+    return { buffer, mimeType }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Ordinary local path → host-side allowlist + sniff + data: URI. Never hands
+ * the raw path to the engine, so the engine's stricter extension check and
+ * narrower allowed-dirs never come into play; the plugin's own (wider,
+ * user-extensible) whitelist is the policy here.
+ */
+async function localPathToDataUri(args, src, allowedDirs) {
+  const roots = (allowedDirs || [])
+    .map((d) => path.resolve(d).toLowerCase())
+    .filter((v, i, arr) => arr.indexOf(v) === i)
+
+  const tryReal = async (candidate) => {
+    try {
+      return await realpath(candidate)
+    } catch {
+      return null
+    }
+  }
+  let real = await tryReal(src)
+  if (real === null && src.startsWith('~/')) real = await tryReal(path.join(homedir(), src.slice(2)))
+
+  if (real === null) {
+    throw new Error(
+      `图片文件不存在或不可读：${src}。请传入存在的本地图片路径、data URI、公网图片 URL，` +
+        '或粘贴的图片 markdown 引用（/dsh-free-vision/raw/...）。',
+    )
+  }
+
+  const realLower = real.toLowerCase()
+  const allowed = roots.some(
+    (root) => realLower === root || realLower.startsWith(root + path.sep),
+  )
+  if (!allowed) {
+    throw new Error(
+      `Access denied: 图片路径不在允许目录内（${src}）。允许目录：${roots.join('、')}。` +
+        '可把图片拷贝到上述目录，或到「设置 → Free Vision → 高级设置」的“允许读取的图片目录”中添加该路径。',
+    )
+  }
+
+  const buffer = await readFile(real)
+  const mimeType = sniffImageType(buffer)
+  if (!mimeType) {
+    throw new Error(`Unsupported image format: ${src}。仅支持 PNG/JPEG/WebP/GIF。`)
+  }
+  return { ...args, image_source: dataUriFor(buffer, mimeType) }
+}
+
+/**
+ * Resolve `args.image_source` before proxying to the vision engine.
+ * - data: URIs / external http(s) URLs: pass through (engine owns the policy).
+ * - dsh-managed references / attachment object files: decode to bytes here.
+ * - other local paths: host-side allowlist + sniff → data: URI.
+ */
+async function resolveImageSource(args, helpers) {
+  const { ctx, allowedDirs } = helpers || {}
+  const src = args && typeof args.image_source === 'string' ? args.image_source : null
+  if (!src) return args
+  if (/^data:image\//i.test(src)) return args
+  if (/^https?:\/\//i.test(src) && !/\/dsh-free-vision\/raw\//i.test(src)) return args
+
+  const parsed = parseImageReference(src)
+  if (parsed && (parsed.id || parsed.malformed)) {
+    if (!parsed.id) {
+      throw new Error(
+        `无法解析粘贴的图片引用：${src.slice(0, 80)}。` +
+          '引用格式应为 sha256:<64位hex>（如 /dsh-free-vision/raw/sha256:...）。',
+      )
+    }
+    const attachments = ctx && ctx.get && ctx.get('attachments')
+    const ref = parsed.ref || ATTACHMENT_REF_REGISTRY.get(parsed.id) || null
+    if (ref && attachments && typeof attachments.readImage === 'function') {
+      try {
+        const stored = await attachments.readImage(ref)
+        return {
+          ...args,
+          image_source: dataUriFor(stored.data, stored.ref.mediaType),
+        }
+      } catch {
+        /* verify/reject -> fall through to object-file fallback */
+      }
+    }
+    const sha256 = parsed.id.replace(/^sha256:/i, '')
+    if (/^[a-f0-9]{64}$/i.test(sha256)) {
+      const hit = await readAttachmentObject(sha256, helpers && helpers.attachmentRoot)
+      if (hit) return { ...args, image_source: dataUriFor(hit.buffer, hit.mimeType) }
+    }
+    throw new Error(
+      `无法解析粘贴的图片引用：${src.slice(0, 80)}。` +
+        '引用仅在同一会话内有效；跨会话请使用完整 markdown 引用（带 ?ref=）。',
+    )
+  }
+
+  if (!/^https?:/i.test(src)) return localPathToDataUri(args, src, allowedDirs)
+  return args
+}
+
 // Exported for unit tests (harmless to cordis).
 export {
   CONFIG_PATH,
@@ -780,6 +989,8 @@ export {
   baseURLFor,
   normalizeSettings,
   resolveAllowedDirs,
+  parseImageReference,
+  resolveImageSource,
   PROVIDER_BASE_URLS,
   PROVIDER_BASE_URL_ENV,
 }
