@@ -614,7 +614,7 @@ export function apply(ctx, config = {}) {
           if (req.method === 'GET') {
             const m = /^\/dsh-free-vision\/raw\/([^/]+)$/.exec(p)
             if (m) {
-              await handleRaw(ctx, m[1], res)
+              await handleRaw(ctx, m[1], req.url, res)
               return
             }
           }
@@ -645,10 +645,18 @@ function sniffImageType(buf) {
   return null
 }
 
-/** Build the Markdown reference used in the session for a stored attachment. */
+/** Escape a URL component for Markdown (match describe-image's durable form). */
+function encodeMarkdownComponent(value) {
+  return encodeURIComponent(value).replace(/\(/g, '%28').replace(/\)/g, '%29')
+}
+
+/** In-memory id -> full-ref registry so same-process raw lookups work too. */
+const ATTACHMENT_REF_REGISTRY = new Map()
+
+/** Build the durable Markdown reference (embeds full ref for cross-restart use). */
 function attachmentMarkdownFor(ref) {
-  const id = encodeURIComponent(ref.attachmentId)
-  return `![图片](/dsh-free-vision/raw/${id})`
+  const id = encodeMarkdownComponent(ref.attachmentId).replace(/%3a/gi, ':').replace(/%3A/gi, ':')
+  return `![图片](/dsh-free-vision/raw/${id}?ref=${encodeMarkdownComponent(JSON.stringify(ref))})`
 }
 
 /** POST /dsh-free-vision/attach — persist one image, return a Markdown ref. */
@@ -697,6 +705,8 @@ async function handleAttach(ctx, req, res) {
       mediaType,
       ...(typeof parsed.name === 'string' && parsed.name ? { name: parsed.name } : {}),
     })
+    // Remember the full ref so a bare raw/:id lookup works this process too.
+    ATTACHMENT_REF_REGISTRY.set(ref.attachmentId, ref)
     sendJson(200, {
       ok: true,
       markdown: attachmentMarkdownFor(ref),
@@ -707,8 +717,12 @@ async function handleAttach(ctx, req, res) {
   }
 }
 
-/** GET /dsh-free-vision/raw/<id> — return stored image bytes (for rendering). */
-async function handleRaw(ctx, id, res) {
+/**
+ * GET /dsh-free-vision/raw/<id> — return stored image bytes (for rendering).
+ * Durable form carries the full ref in ?ref=; a bare id falls back to the
+ * in-process registry (session-scope rendering).
+ */
+async function handleRaw(ctx, id, url, res) {
   const attachments = ctx.get && ctx.get('attachments')
   if (!attachments || typeof attachments.readImage !== 'function') {
     res.writeHead(404)
@@ -723,8 +737,27 @@ async function handleRaw(ctx, id, res) {
     res.end()
     return
   }
+
+  // Durable: reconstruct the full ref from the markdown's ?ref= query.
+  let ref = null
   try {
-    const stored = await attachments.readImage({ attachmentId: decoded })
+    const q = new URL(url || '/', 'http://dsh.local').searchParams.get('ref')
+    if (q !== null) {
+      const parsed = JSON.parse(q)
+      if (parsed && typeof parsed === 'object' && parsed.attachmentId === decoded) ref = parsed
+    }
+  } catch { /* malformed query -> fall through */ }
+
+  // Fall back to the in-process registry by bare id.
+  if (!ref) ref = ATTACHMENT_REF_REGISTRY.get(decoded) || null
+  if (!ref) {
+    res.writeHead(404)
+    res.end()
+    return
+  }
+
+  try {
+    const stored = await attachments.readImage(ref)
     res.writeHead(200, {
       'content-type': stored.ref.mediaType,
       'content-length': String(stored.data.byteLength),
