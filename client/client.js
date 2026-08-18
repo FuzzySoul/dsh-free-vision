@@ -320,10 +320,17 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
   }
 
   function apply(ctx) {
+    // Best-effort pasted-image bridge: never let a failure here break the
+    // settings UI. If the host doesn't expose a 'conversation' service, or the
+    // service surface differs, installSendHook no-ops and pasting stays native.
     if (typeof ctx.inject === "function") {
-      ctx.inject(["slots", "conversation"], (scope) => {
-        installSendHook(scope.conversation);
-      });
+      try {
+        ctx.inject(["slots", "conversation"], (scope) => {
+          try {
+            installSendHook(scope.conversation);
+          } catch { /* ignore: hooking is best-effort */ }
+        });
+      } catch { /* ignore: conversation service unavailable */ }
     }
     ctx.slots.inject("settings.section", () => ctx.slots.register({
       name: "settings.section",
