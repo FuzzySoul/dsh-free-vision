@@ -12,3 +12,6 @@ free-vision.json
 coverage/
 dist/
 out/
+
+# release helpers (kept out of git; the GitHub Release workflow generates these)
+release-notes.md

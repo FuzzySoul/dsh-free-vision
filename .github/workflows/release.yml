@@ -1,0 +1,88 @@
+name: Release
+
+# 一条龙发布：本地 `node scripts/release.mjs` 打 vX.Y.Z tag 并 push 后，
+# 这里自动完成 —— npm publish + GitHub Release（含 tgz 附件）。
+# 不需要手动点按钮，也不需要单独建 Release。
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  release:
+    name: Publish npm + GitHub Release
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 从 tag 名取版本号，例如 v1.0.3 -> 1.0.3
+      - name: Resolve version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+          cache: npm
+
+      - run: npm ci
+
+      # 1) npm 发布（provenance 说明来源）。NPM_TOKEN 存在仓库 secrets 里。
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # 2) 打包出 .tgz（本地产物，已被 .gitignore 忽略，不会污染 Git），
+      #    作为 GitHub Release 的附件。检验一下 tgz 确实存在。
+      - name: Pack tarball
+        run: |
+          npm pack --pack-destination ./dist
+          ls -la ./dist/
+
+      # 3) 创建 / 更新 GitHub Release：tag 已由本地 release.mjs 打好并 push，
+      #    这里用它做 Release；notes 从 CHANGELOG 摘当前版本段。
+      - name: Build release notes
+        id: notes
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          # 提取 CHANGELOG 当前版本段（支持 "## [x.y.z] - date" 头）
+          awk -v v="## [$VERSION]" '
+            /^## \[/ { if (!started && index($0, v)==1) { started=1; next } if (started) exit }
+            started { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then echo "### Changes" > release-notes.md; fi
+          echo "--- notes ---"; cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: v${{ steps.version.outputs.VERSION }}
+          body_path: release-notes.md
+          files: ./dist/*.tgz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
