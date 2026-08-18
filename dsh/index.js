@@ -175,7 +175,10 @@ function resolveAllowedDirs(cfg) {
 }
 
 export const name = 'free-vision'
-export const inject = ['tools']
+// 'attachments' is the host attachment store used to persist/read pasted images
+// so text-only models can read them through the vision tool (same seam that
+// describe-image uses). Only mounted where the host provides it.
+export const inject = ['tools', 'attachments']
 
 /** Provider -> API key env variable. */
 const PROVIDER_KEY_ENV = {
@@ -580,7 +583,157 @@ export function apply(ctx, config = {}) {
           res.end()
         },
       })
+
+      // ── Pasted-image bridge: persist/read inline images so text-only models
+      //    can see them through the vision tool. Same attachment seam that
+      //    describe-image uses; namespaced under /dsh-free-vision so the two
+      //    never collide. Only active when the host mounts the attachments store.
+      //    POST /dsh-free-vision/attach  -> save one base64 image, return a
+      //                                     Markdown reference for the session.
+      //    GET  /dsh-free-vision/raw/<id> -> return the stored image bytes so
+      //                                     the pasted reference renders.
+      scope.webServer.register({
+        kind: 'prefix',
+        path: '/dsh-free-vision',
+        handler: async (req, res) => {
+          const u = new URL(req.url || '/', 'http://x')
+          const p = u.pathname
+
+          // Let the exact /config route keep handling config (it takes precedence).
+          if (p === '/dsh-free-vision/config') {
+            res.writeHead(404)
+            res.end()
+            return
+          }
+
+          if (req.method === 'POST' && p === '/dsh-free-vision/attach') {
+            await handleAttach(ctx, req, res)
+            return
+          }
+
+          if (req.method === 'GET') {
+            const m = /^\/dsh-free-vision\/raw\/([^/]+)$/.exec(p)
+            if (m) {
+              await handleRaw(ctx, m[1], res)
+              return
+            }
+          }
+
+          res.writeHead(404)
+          res.end()
+        },
+      })
     })
+  }
+}
+
+/** Base64 -> Buffer, rejecting clearly-invalid payloads. */
+function b64ToBuffer(data) {
+  if (typeof data !== 'string' || data.length === 0) return null
+  const buf = Buffer.from(data, 'base64')
+  if (buf.length === 0) return null
+  return buf
+}
+
+/** Crude magic-byte check so we only persist actual images. */
+function sniffImageType(buf) {
+  if (buf.length < 8) return null
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif'
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return 'image/webp'
+  return null
+}
+
+/** Build the Markdown reference used in the session for a stored attachment. */
+function attachmentMarkdownFor(ref) {
+  const id = encodeURIComponent(ref.attachmentId)
+  return `![图片](/dsh-free-vision/raw/${id})`
+}
+
+/** POST /dsh-free-vision/attach — persist one image, return a Markdown ref. */
+async function handleAttach(ctx, req, res) {
+  const sendJson = (status, body) => {
+    res.writeHead(status, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify(body))
+  }
+  let body = ''
+  for await (const chunk of req) {
+    body += chunk
+    if (body.length > 16 * 1024 * 1024) {
+      sendJson(413, { ok: false, error: 'payload too large' })
+      return
+    }
+  }
+  let parsed
+  try {
+    parsed = JSON.parse(body || '{}')
+  } catch {
+    sendJson(400, { ok: false, error: 'invalid JSON' })
+    return
+  }
+  if (typeof parsed.base64 !== 'string') {
+    sendJson(400, { ok: false, error: 'missing base64' })
+    return
+  }
+  const raw = b64ToBuffer(parsed.base64)
+  if (!raw) {
+    sendJson(400, { ok: false, error: 'invalid base64' })
+    return
+  }
+  const mediaType = sniffImageType(raw) || (typeof parsed.mediaType === 'string' ? parsed.mediaType : null)
+  if (!mediaType) {
+    sendJson(400, { ok: false, error: 'unsupported image type' })
+    return
+  }
+  const attachments = ctx.get && ctx.get('attachments')
+  if (!attachments || typeof attachments.saveImage !== 'function') {
+    sendJson(503, { ok: false, error: 'attachment service not mounted' })
+    return
+  }
+  try {
+    const ref = await attachments.saveImage({
+      data: raw,
+      mediaType,
+      ...(typeof parsed.name === 'string' && parsed.name ? { name: parsed.name } : {}),
+    })
+    sendJson(200, {
+      ok: true,
+      markdown: attachmentMarkdownFor(ref),
+      note: `[image attachment ${JSON.stringify(ref)}]`,
+    })
+  } catch (error) {
+    sendJson(500, { ok: false, error: `attachment store rejected: ${error?.message || error}` })
+  }
+}
+
+/** GET /dsh-free-vision/raw/<id> — return stored image bytes (for rendering). */
+async function handleRaw(ctx, id, res) {
+  const attachments = ctx.get && ctx.get('attachments')
+  if (!attachments || typeof attachments.readImage !== 'function') {
+    res.writeHead(404)
+    res.end()
+    return
+  }
+  let decoded
+  try {
+    decoded = decodeURIComponent(id)
+  } catch {
+    res.writeHead(404)
+    res.end()
+    return
+  }
+  try {
+    const stored = await attachments.readImage({ attachmentId: decoded })
+    res.writeHead(200, {
+      'content-type': stored.ref.mediaType,
+      'content-length': String(stored.data.byteLength),
+      'cache-control': 'private, max-age=3600',
+    })
+    res.end(Buffer.from(stored.data))
+  } catch {
+    res.writeHead(404)
+    res.end()
   }
 }
 

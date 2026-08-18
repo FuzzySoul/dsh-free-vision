@@ -10,7 +10,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
 
   const NS = "free-vision";
   const name = "free-vision";
-  const inject = ["slots"];
+  const inject = ["slots", "conversation"];
 
   const PROVIDERS = [
     { key: "qwen",        name: "Qwen / 千问", free: true,  tag: "限免 50万 token", desc: "Qwen3-VL-Flash",   env: "DASHSCOPE_API_KEY",  url: "https://bailian.console.aliyun.com/", urlText: "阿里云百炼申请", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
@@ -230,7 +230,101 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     );
   }
 
+  // ── Pasted-image bridge (send rewrite) ─────────────────────────────
+  // Text-only models reject image blocks at submit. This wraps the
+  // conversation send so pasted images are uploaded to the free-vision attach
+  // route and turned into `![图片](/dsh-free-vision/raw/...)` references that
+  // the vision tool can read. Idempotent: a marker prevents double install,
+  // so it coexists with describe-image without re-hooking.
+  const SEND_HOOK_MARKER = "__dshFreeVisionSendHooked";
+
+  function readFileAsBase64(file) {
+    return new Promise((resolve) => {
+      try {
+        const reader = new FileReader();
+        reader.onerror = () => resolve({ ok: false });
+        reader.onload = () => {
+          const result = typeof reader.result === "string" ? reader.result : "";
+          const comma = result.indexOf(",");
+          if (comma < 0) return resolve({ ok: false });
+          resolve({ ok: true, base64: result.slice(comma + 1) });
+        };
+        reader.readAsDataURL(file);
+      } catch {
+        resolve({ ok: false });
+      }
+    });
+  }
+
+  async function uploadForFreeVision(base64, mediaType, name) {
+    try {
+      const response = await fetch("/dsh-free-vision/attach", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          base64,
+          mediaType,
+          ...(name == null || name === "" ? {} : { name }),
+        }),
+      });
+      const body = await response.json().catch(() => null);
+      if (body && body.ok === true && typeof body.markdown === "string" && body.markdown !== "") {
+        return { ok: true, markdown: body.markdown };
+      }
+      return { ok: false, message: (body && body.error) || "attach failed" };
+    } catch {
+      return { ok: false, message: "network failed" };
+    }
+  }
+
+  // Wrap the conversation send so image-bearing sends become text prompts
+  // carrying free-vision image references (skipped when the send has no images).
+  function installSendHook(conversation) {
+    const face = conversation;
+    if (!face || typeof face !== "object") return;
+    if (typeof face.sendSession !== "function") return;
+    if (typeof face.draftImages !== "function" || typeof face.releaseDraftImage !== "function") return;
+    if (face[SEND_HOOK_MARKER]) return;
+
+    const original = face.sendSession;
+    face.sendSession = async (session, text, imageIds, mode) => {
+      if (!imageIds || imageIds.length === 0) {
+        return original.call(face, session, text, imageIds, mode);
+      }
+      const attachments = face.draftImages(imageIds);
+      if (!attachments || attachments.length !== imageIds.length) {
+        return original.call(face, session, text, imageIds, mode);
+      }
+      const refs = [];
+      for (const attachment of attachments) {
+        const file = attachment && attachment.file;
+        if (!file) { refs.length = 0; break; }
+        const read = await readFileAsBase64(file);
+        if (!read.ok) { refs.length = 0; break; }
+        const uploaded = await uploadForFreeVision(read.base64, file.type || "", file.name || "");
+        if (!uploaded.ok) { refs.length = 0; break; }
+        refs.push(uploaded.markdown);
+      }
+      if (refs.length !== attachments.length) {
+        // Upload failed; fall back to the default send so we don't lose the message.
+        return original.call(face, session, text, imageIds, mode);
+      }
+      const fullText = [text && text.trim ? text.trim() : "", ...refs].filter((part) => part !== "").join("\n");
+      const result = await session.prompt([{ type: "text", text: fullText }], mode);
+      if (!result || !result.ok) {
+        throw new Error(`conversation.send failed: ${(result && result.error && result.error.code) || "unknown"}`);
+      }
+      for (const id of imageIds) face.releaseDraftImage(id);
+    };
+    face[SEND_HOOK_MARKER] = true;
+  }
+
   function apply(ctx) {
+    if (typeof ctx.inject === "function") {
+      ctx.inject(["slots", "conversation"], (scope) => {
+        installSendHook(scope.conversation);
+      });
+    }
     ctx.slots.inject("settings.section", () => ctx.slots.register({
       name: "settings.section",
       id: "free-vision",
