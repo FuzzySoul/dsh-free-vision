@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — show_image：agent 把找到/截图/生成的图片内联渲染进对话流
+
+借鉴社区 `dsh-image-inline` 思路但按本插件的自有架构实现（复用已有 `/dsh-free-vision/raw`
+路由与附件服务，不引入额外注册表/HTTP 端点）：
+
+- 新工具 `show_image(image_source, caption?)`：模型把本地图片 / 粘贴引用 / data URI
+  渲染进对话流（QQ/微信式内联卡片）。host 校验 + `attachments.saveImage` 持久化为
+  sha256 内容寻址附件，结果**纯文本**（路径+尺寸+元数据），图片**不进模型上下文**；
+  展示载荷走 `output.presentationMeta` → `tool/result` meta。
+- 客户端注册 `tool.call.toolview`（key=`show_image`）渲染内联 `<img>` 卡片（点击新窗口
+  看原图），加载走 `/dsh-free-vision/raw/<id>`。
+- 配置：`showImageEnabled`（默认开）、`showImageToolName`（可改名避冲突）、
+  `showImageMaxBytes`、`showImagePixels`；设置 UI 高级设置可调。
+- 健壮性：host 工具名冲突时捕获跳过不拖垮 fiber；client 槽位/配置不可用时自动退化
+  为纯文本结果；结果永不含 image 块（纯文本/极简模式路由不受影响，同 v1.0.6-1.0.7 纪律）。
+- 修复：`/dsh-free-vision/raw` 增加 **object-file 内容寻址兜底**（优先用附件服务 root，
+  兼容 DSH_HOME 覆盖），`show_image` 保存后登记进程内 registry —— 修复真实 E2E 里发现的
+  `/raw` 404（同一附件 id 两次请求均 200，DOM `naturalWidth` 确认图片真实渲染）。
+- 真实 E2E（隔离 dsh web + DeepSeek V4 Flash）：模型一条指令直接调 `show_image`
+  （工具调用 0.1s，不调视觉 API），对话流工具行内联显示图片；`image_understand` 仍可并行分析。
+- 新增 11 个 host 单测（解析/保存/meta/大小与像素上限/冲突/未挂载附件服务）。
+
 ## [1.0.7] - 2026-08-18
 
 ### Added / Changed — 一步到位：粘贴图片直接给出描述，秒答

@@ -37,6 +37,14 @@ export interface FreeVisionConfig {
   describePrompt?: string
   /** Vision-description LRU cache capacity (per sha256). */
   describeCacheSize?: number
+  /** Enable the show_image tool (render a found/screenshot image into the chat). */
+  showImageEnabled?: boolean
+  /** Public wire name for the show_image tool (renamable to dodge collisions). */
+  showImageToolName?: string
+  /** Per-image byte cap for show_image (also bounded by host attachment limits). */
+  showImageMaxBytes?: number
+  /** Pixel cap (w×h) for show_image; 0 = unlimited. */
+  showImagePixels?: number
   /** Legacy single key (deprecated, migrated to keys) */
   apiKey?: string
 }

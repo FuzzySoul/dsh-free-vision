@@ -34,6 +34,8 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     describeAtDispatch: "One-step describe / 一步识别：粘贴图直接给出描述（推荐开启）",
     describePrompt: "Describe prompt / 图片描述提示词",
     describeCacheSize: "Describe cache / 描述缓存条数",
+    showImageEnabled: "Show-inline images / 对话内展示图片（show_image，推荐开启）",
+    showImageToolName: "show_image tool name / show_image 工具名",
     lumaEnv: "Extra Env / 额外环境变量 (JSON)",
   };
 
@@ -209,6 +211,8 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
         value: state.value.describePrompt || "",
         onChange: (e) => set("describePrompt", e.target.value),
       })),
+      adv(ADVANCED_LABELS.showImageEnabled, false, toggle("showImageEnabled")),
+      adv(ADVANCED_LABELS.showImageToolName, false, input("showImageToolName")),
       (function () {
         const ad = state.allowedDirs;
         if (!ad || !Array.isArray(ad.all)) return null;
@@ -371,6 +375,102 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     face[SEND_HOOK_MARKER] = true;
   }
 
+  // ── show_image inline card ─────────────────────────────────────────────
+  // The browser half of the "model renders an image into the chat" feature.
+  // Registered on the keyed `tool.call.toolview` slot for the show_image tool
+  // name, so every show_image row in the conversation renders OUR card at the
+  // call's own position. The card is a pure function of the call node:
+  //   - running  -> one-line summary of the requested image_source
+  //   - error    -> the text error
+  //   - done     -> reads the tool's private `meta` (threaded from the host's
+  //                 output.presentationMeta through tool/result, never part of
+  //                 model context) and shows `<img>` via our own
+  //                 /dsh-free-vision/raw/<id> route (click opens original).
+  //   - no meta  -> falls back to the plain text result (older replays).
+  const SHOW_IMAGE_DEFAULT = "show_image";
+
+  function showCardText(block) {
+    let out = "";
+    const content = block && block.content;
+    if (Array.isArray(content)) {
+      for (const b of content) {
+        if (b && b.type === "text" && typeof b.text === "string") out += b.text;
+      }
+    }
+    return out;
+  }
+
+  function showCardRunningPath(block) {
+    try {
+      const parsed = JSON.parse((block && block.argsRaw) || "{}");
+      return (parsed && typeof parsed.image_source === "string" && parsed.image_source) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function ShowImageCard(props) {
+    if (!props || typeof props !== "object") return null;
+    const block = props.block;
+    if (!block || typeof block !== "object") return null;
+    // Running call (no 'kind' yet).
+    if (!("kind" in block)) {
+      return react.createElement("div", { style: st.showRow },
+        "显示图片： " + (showCardRunningPath(block) || "…"));
+    }
+    if (block.isError === true) {
+      return react.createElement("div", { style: st.showErr },
+        "图片显示失败：" + (showCardText(block) || "unknown"));
+    }
+    const meta = block.meta;
+    if (meta && typeof meta === "object" && typeof meta.attachmentId === "string" && typeof meta.mediaType === "string" && meta.attachmentId !== "") {
+      const src = "/dsh-free-vision/raw/" + encodeURIComponent(meta.attachmentId);
+      const children = [];
+      if (typeof meta.caption === "string" && meta.caption !== "") {
+        children.push(react.createElement("div", { key: "cap", style: st.showCaption }, meta.caption));
+      }
+      children.push(react.createElement("img", {
+        key: "img",
+        src,
+        alt: meta.path || "图片",
+        style: st.showImg,
+        loading: "lazy",
+        onClick: () => { try { window.open(src, "_blank"); } catch { /* popup blocked: ignore */ } },
+      }));
+      return react.createElement("div", { style: st.showRow }, children);
+    }
+    // No usable meta -> show the plain text result so history still reads.
+    return react.createElement("div", { style: st.showRow }, showCardText(block) || "图片已显示（缺少元数据）");
+  }
+
+  // Register the inline tool row for show_image, reading the live tool name
+  // (and enable flag) from the plugin config so a rename/downgrade takes
+  // effect without a restart. Best-effort and guarded: if the slot is absent
+  // or config is unreachable the generic tool row renders instead, so the
+  // conversation is never broken by this feature.
+  function installShowImageToolview(ctx) {
+    if (!ctx || typeof ctx.slots !== "object" || !ctx.slots || typeof ctx.slots.inject !== "function") return;
+    try {
+      fetch("/dsh-free-vision/config", { cache: "no-store" })
+        .then((r) => r.json())
+        .then((body) => {
+          const value = body && body.value;
+          if (!value || value.showImageEnabled === false) return;
+          const key = (typeof value.showImageToolName === "string" && value.showImageToolName.trim())
+            ? value.showImageToolName.trim()
+            : SHOW_IMAGE_DEFAULT;
+          try {
+            ctx.slots.inject("tool.call.toolview", () => ctx.slots.register({
+              name: "tool.call.toolview",
+              key,
+              locale: NS,
+            }, ShowImageCard));
+          } catch { /* slot registration is best-effort */ }
+        })
+        .catch(() => { /* config unreachable: generic row stays */ });
+    } catch { /* ignore */ }
+  }
+
   function apply(ctx) {
     // Best-effort pasted-image bridge: never let a failure here break the
     // settings UI. If the host doesn't expose a 'conversation' service, or the
@@ -392,6 +492,7 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
       locale: NS,
       inject: () => ({})
     }, () => react.createElement(Section)));
+    installShowImageToolview(ctx);
   }
 
   // Dark theme throughout: some vision models / screenshot pipelines cannot
@@ -470,6 +571,16 @@ window.__ModuleLoader__.load({ id: "dsh-free-vision", factory: (require) => {
     ok: { fontSize: 12, color: "#3fb950" },
     error: { fontSize: 12, color: "#f85149" },
     mono: { fontSize: 11, fontFamily: "monospace", color: "#9da7b3", margin: "1px 0" },
+    showRow: {
+      padding: "6px 0", display: "flex", flexDirection: "column", gap: 6,
+      alignItems: "flex-start",
+    },
+    showImg: {
+      maxWidth: 420, maxHeight: 320, borderRadius: 8, cursor: "zoom-in",
+      background: "#0d1117", border: "1px solid #30363d",
+    },
+    showCaption: { fontSize: 12, color: "#9da7b3", whiteSpace: "pre-wrap" },
+    showErr: { fontSize: 12, color: "#f85149", padding: "4px 0" },
   };
 
   exports.name = name;

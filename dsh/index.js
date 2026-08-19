@@ -100,6 +100,22 @@ export const Config = z.object({
     .number()
     .description('图片描述缓存条数（按 sha256，进程内 LRU）/ vision-description cache capacity (per sha256, in-process LRU)')
     .default(64),
+  showImageEnabled: z
+    .boolean()
+    .description('启用 show_image 工具：模型把找到/截图/生成的图片渲染进对话流（QQ/微信式内联卡片，图片不进模型上下文）/ enable the show_image tool: the model renders a found/screenshot/generated image into the chat flow as an inline card (image never enters model context)')
+    .default(true),
+  showImageToolName: z
+    .string()
+    .description('show_image 的公开工具名（与其它插件冲突时可改名）/ public tool name for the inline-image tool (rename when it collides with another plugin)')
+    .default('show_image'),
+  showImageMaxBytes: z
+    .number()
+    .description('show_image 单图字节上限（还需受宿主附件限制约束）/ per-image byte cap for show_image (further bounded by the host attachment limits)')
+    .default(25 * 1024 * 1024),
+  showImagePixels: z
+    .number()
+    .description('show_image 像素上限（宽×高），0=不限制 / pixel cap (w×h) for show_image, 0 = unlimited')
+    .default(40_000_000),
 })
 
 const PROXY_VARS = [
@@ -900,6 +916,24 @@ export function apply(ctx, config = {}) {
     })
   }
 
+  // ── show_image tool: render a found/screenshot/generated image into the
+  //    chat flow (host side). Register only while an attachment store is
+  //    mounted and the feature is enabled; a duplicate wire-name registration
+  //    must never take down the plugin fiber (modlens #21), so it is caught
+  //    and reported here. The browser half registers `tool.call.toolview` for
+  //    the same tool name to render the inline card.
+  if (typeof ctx.inject === 'function') {
+    ctx.inject(['attachments'], () => {
+      if (getEffective().showImageEnabled === false) return
+      try {
+        disposers.push(ctx.tools.register(buildShowImageTool(ctx, { getEffective, label, log })))
+        log.info(`[${label()}] show_image tool registered`)
+      } catch (error) {
+        log.error(`[${label()}] show_image tool registration skipped (name collision?): ${error?.message || error}`)
+      }
+    })
+  }
+
   // ── Web settings UI (only under the web profile) ──────────────────────
   // GET  /dsh-free-vision/config -> { schema, value }
   // POST /dsh-free-vision/config -> save settings, drop the live engine so
@@ -1123,6 +1157,22 @@ async function handleRaw(ctx, id, url, res) {
 
   // Fall back to the in-process registry by bare id.
   if (!ref) ref = ATTACHMENT_REF_REGISTRY.get(decoded) || null
+
+  // Durable path: content-addressed object file in the attachment store root
+  // (registry-independent, survives host restarts and DSH_HOME overrides).
+  if (!ref && /^sha256:[0-9a-f]{64}$/i.test(decoded)) {
+    const hit = await readAttachmentObject(decoded.replace(/^sha256:/i, ''), storeRootOf(attachments))
+    if (hit) {
+      res.writeHead(200, {
+        'content-type': hit.mimeType,
+        'content-length': String(hit.buffer.byteLength),
+        'cache-control': 'private, max-age=3600',
+      })
+      res.end(Buffer.from(hit.buffer))
+      return
+    }
+  }
+
   if (!ref) {
     res.writeHead(404)
     res.end()
@@ -1154,6 +1204,32 @@ async function handleRaw(ctx, id, url, res) {
 /** Root of the host attachment store used for object-file fallback reads. */
 function attachmentStoreRoot() {
   return path.join(homedir(), '.dsh', 'attachments', 'v1')
+}
+
+/**
+ * The attachment store's own content-addressed root when the service exposes
+ * one (robust across DSH_HOME overrides and host changes), else the default
+ * homedir-based root. `attachments.root` is the v1 base dir; newer stores may
+ * expose `storeRoot` or `imagePath`.
+ */
+export function storeRootOf(attachments) {
+  if (attachments && typeof attachments === 'object') {
+    if (typeof attachments.storeRoot === 'string' && attachments.storeRoot) return attachments.storeRoot
+    if (typeof attachments.root === 'string' && attachments.root) return attachments.root
+    if (typeof attachments.imagePath === 'function') {
+      // Older stores advertise only imagePath(ref); treat its dirname as root
+      // when the store has no root string.
+      try {
+        const probe = { attachmentId: 'sha256:' + '0'.repeat(64), mediaType: 'image/png' }
+        const p = attachments.imagePath(probe)
+        if (typeof p === 'string' && p.includes('/objects/') || (typeof p === 'string' && p.includes('/objects\\'))) {
+          const m = /^(.*)[/\\]objects[/\\][0-9a-f]{2}[/\\][0-9a-f]{64}$/i.exec(p)
+          if (m) return m[1]
+        }
+      } catch { /* ignore */ }
+    }
+  }
+  return attachmentStoreRoot()
 }
 
 /** Build a data: URI from raw bytes after sniffing its MIME type. */
@@ -1326,7 +1402,8 @@ async function resolveImageSource(args, helpers) {
     }
     const sha256 = parsed.id.replace(/^sha256:/i, '')
     if (/^[a-f0-9]{64}$/i.test(sha256)) {
-      const hit = await readAttachmentObject(sha256, helpers && helpers.attachmentRoot)
+      const root = (helpers && helpers.attachmentRoot) || storeRootOf(ctx && ctx.get && ctx.get('attachments'))
+      const hit = await readAttachmentObject(sha256, root)
       if (hit) return { ...args, image_source: dataUriFor(hit.buffer, hit.mimeType) }
     }
     throw new Error(
@@ -1337,6 +1414,173 @@ async function resolveImageSource(args, helpers) {
 
   if (!/^https?:/i.test(src)) return localPathToDataUri(args, src, allowedDirs)
   return args
+}
+
+// ═══ show_image: render an image into the chat flow (host side) ════════════
+// The model calls `show_image` when it wants the *user* to see an image it
+// found / screenshotted / generated. Unlike image_understand (which returns a
+// text analysis), this tool persists the bytes as a content-addressed
+// attachment and returns TEXT ONLY (path + metadata); the browser half renders
+// an inline card at the tool row via the `tool.call.toolview` slot, loading
+// bytes through the plugin's existing /dsh-free-vision/raw route. The image
+// never enters the model context, so text-only model routes stay clean.
+// Concept mirrors the community dsh-image-inline tool, but reuses this
+// plugin's own resolver + HTTP route (no extra registry / route needed).
+
+/** Decode a `data:image/<type>;base64,…` URI produced by the source resolver. */
+export function dataUriToBytes(uri) {
+  if (typeof uri !== 'string') return null
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(uri)
+  if (!match) return null
+  const buffer = Buffer.from(match[2], 'base64')
+  if (buffer.length === 0) return null
+  return { buffer, mimeType: match[1] || 'image/png' }
+}
+
+/** Text-only model-visible summary; the card also shows via presentationMeta. */
+export function formatShowImageResult(value) {
+  const lines = [`已显示图片：${value.path || value.attachmentId || '(缺失)'}`]
+  if (typeof value.caption === 'string' && value.caption.trim()) lines.push(`说明：${value.caption}`)
+  lines.push(`${value.mediaType} · ${value.width}x${value.height}px · ${value.bytes} bytes`)
+  return lines.join('\n')
+}
+
+/**
+ * Build the `show_image` tool definition (name overridable via config to dodge
+ * collisions with other plugins that register the same wire name).
+ * @param ctx - plugin context carrying `tools` and a live `attachments` store.
+ * @param helpers - `{ getEffective, label, log }`; getEffective resolves the
+ *   live plugin config (re-read per call so settings saves apply immediately).
+ */
+export function buildShowImageTool(ctx, helpers = {}) {
+  const getEffective = helpers.getEffective || (() => ({}))
+  const label = helpers.label || (() => 'free-vision')
+  const log = helpers.log || {
+    error: (...a) => { try { console.error(...a) } catch {} },
+  }
+  return {
+    name: getEffective().showImageToolName || 'show_image',
+    description:
+      '把一张图片渲染进对话流，让用户在现场直接看到（QQ/微信聊天式：图片内联显示在会话里、可上翻）。' +
+      '当用户需要看到你找到的、测试截的图、生成的图片或工作区里的图片文件时调用。' +
+      '图片以纯文本结果返回，图片本身不会占用模型上下文。image_source 支持本地路径、/dsh-free-vision/raw 引用或 data URI；不支持远程 http(s) URL。',
+    parameters: {
+      type: 'object',
+      properties: {
+        image_source: {
+          type: 'string',
+          description: '要展示的图片：本地绝对路径（PNG/JPEG/WebP/GIF）、/dsh-free-vision/raw/… 粘贴引用、或 data:image/…;base64,… URI。不支持远程 http(s) 地址。',
+        },
+        caption: {
+          type: 'string',
+          description: '可选：显示在这张图片下方的说明文字（如截图来源、测试结论）。',
+        },
+      },
+      required: ['image_source'],
+      additionalProperties: false,
+    },
+    output: {
+      schema: {
+        type: 'object',
+        properties: {
+          path: { type: 'string' },
+          caption: { type: 'string' },
+          attachmentId: { type: 'string' },
+          mediaType: { type: 'string' },
+          bytes: { type: 'integer' },
+          width: { type: 'integer' },
+          height: { type: 'integer' },
+        },
+        required: ['path', 'attachmentId', 'mediaType', 'bytes', 'width', 'height'],
+        additionalProperties: false,
+      },
+      // Text only — the whole model-visible result.
+      render: (_args, value) => [{ type: 'text', text: formatShowImageResult(value) }],
+      // Threaded into the tool/result event `meta`; the browser half reads it
+      // to build the card. Never model-visible.
+      presentationMeta: (_args, value) => ({
+        path: value.path,
+        caption: typeof value.caption === 'string' ? value.caption : '',
+        attachmentId: value.attachmentId,
+        mediaType: value.mediaType,
+        bytes: value.bytes,
+        width: value.width,
+        height: value.height,
+      }),
+    },
+    isConcurrencySafe: () => true,
+    async execute(args, exec) {
+      const src = args && typeof args.image_source === 'string' ? args.image_source.trim() : ''
+      if (!src) {
+        throw new Error(`[${label()}] show_image: image_source 不能为空（本地路径 / /dsh-free-vision/raw 引用 / data URI）`)
+      }
+      if (/^https?:\/\//i.test(src) && !/\/dsh-free-vision\/raw\//i.test(src)) {
+        throw new Error(`[${label()}] show_image: 暂不支持远程 http(s) 图片，请先下载到本地，或改用 /dsh-free-vision/raw/… 引用 / data URI`)
+      }
+      // Resolve path / ref / data-URI through the SAME host-side resolver the
+      // vision tool uses (allowlist + sniff + bytes→data URI). Throws with
+      // friendly messages for missing/denied sources.
+      const resolved = await resolveImageSource(
+        { image_source: src },
+        { ctx, allowedDirs: resolveAllowedDirs(getEffective()).all },
+      )
+      const decoded = dataUriToBytes(resolved && resolved.image_source)
+      if (!decoded) {
+        throw new Error(`[${label()}] show_image: 无法解析图片字节（${src.slice(0, 80)}）`)
+      }
+      const attachments = ctx && ctx.get && ctx.get('attachments')
+      if (!attachments || typeof attachments.saveImage !== 'function') {
+        throw new Error(`[${label()}] show_image: 附件服务未挂载`)
+      }
+      const limits = attachments.imageLimits
+      const byteCap = Math.min(
+        Number.isFinite(getEffective().showImageMaxBytes) ? getEffective().showImageMaxBytes : Infinity,
+        Number.isFinite(limits && limits.maxImageBytes) ? limits.maxImageBytes : Infinity,
+      )
+      if (decoded.buffer.byteLength > byteCap) {
+        throw new Error(`[${label()}] show_image: 图片 ${decoded.buffer.byteLength} 字节，超过上限 ${byteCap} 字节`)
+      }
+      let ref
+      try {
+        ref = await attachments.saveImage({
+          data: decoded.buffer,
+          mediaType: decoded.mimeType,
+          name: typeof args.name === 'string' && args.name ? args.name : undefined,
+        })
+      } catch (error) {
+        log.error(`[${label()}] show_image saveImage failed: ${error?.message || error}`)
+        throw new Error(`[${label()}] show_image: 附件保存失败 ${(error && error.message) || error}`)
+      }
+      const width = Number(ref && ref.width) || 0
+      const height = Number(ref && ref.height) || 0
+      const pxCap = Number(getEffective().showImagePixels) || 0
+      if (pxCap > 0 && width * height > pxCap) {
+        throw new Error(`[${label()}] show_image: 图片 ${width}x${height}px 超过像素上限 ${pxCap}`)
+      }
+      // Make the content-addressed ref resolvable in-process by /dsh-free-vision/raw
+      // and by the vision tool's resolver (same seam as the paste bridge).
+      try {
+        const id = String(ref.attachmentId)
+        if (id) ATTACHMENT_REF_REGISTRY.set(id, {
+          attachmentId: id,
+          mediaType: ref.mediaType,
+          bytes: Number(ref.bytes) || decoded.buffer.byteLength,
+          width,
+          height,
+          name: typeof args.name === 'string' && args.name ? args.name : undefined,
+        })
+      } catch { /* registry is best-effort; /raw has the object-file fallback */ }
+      return {
+        path: src,
+        caption: typeof args.caption === 'string' ? args.caption : '',
+        attachmentId: String(ref.attachmentId),
+        mediaType: ref.mediaType,
+        bytes: Number(ref.bytes) || decoded.buffer.byteLength,
+        width,
+        height,
+      }
+    },
+  }
 }
 
 // Exported for unit tests (harmless to cordis).
