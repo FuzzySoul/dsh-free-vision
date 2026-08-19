@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-08-19
+
 ### Added — show_image：agent 把找到/截图/生成的图片内联渲染进对话流
 
 借鉴社区 `dsh-image-inline` 思路但按本插件的自有架构实现（复用已有 `/dsh-free-vision/raw`
